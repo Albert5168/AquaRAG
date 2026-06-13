@@ -98,8 +98,15 @@ def get_stats():
     
     db_size_mb = os.path.getsize(db_path) / (1024 * 1024)
     
-    active_model = "Gemini 1.5 Flash" if os.getenv("GEMINI_API_KEY") else "Qwen-2.5 7B"
-    active_desc = "Cloud LLM via Google API" if os.getenv("GEMINI_API_KEY") else "Local LLM via Ollama"
+    if os.getenv("GEMINI_API_KEY"):
+        model_id = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+        active_model = " ".join([w.capitalize() for w in model_id.split("-")])
+        if "Gemini" not in active_model:
+            active_model = f"Gemini {active_model}"
+        active_desc = "Cloud LLM via Google API"
+    else:
+        active_model = "Qwen-2.5 7B"
+        active_desc = "Local LLM via Ollama"
     
     return {
         "exam_sets_count": exam_sets_count,
@@ -235,7 +242,8 @@ async def sse_chat_generator(message: str, history: List[Dict[str, str]]):
     if gemini_key:
         try:
             genai.configure(api_key=gemini_key)
-            model = genai.GenerativeModel("gemini-1.5-flash")
+            model_id = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+            model = genai.GenerativeModel(model_id)
             
             # Format history for Gemini chat
             gemini_history = []

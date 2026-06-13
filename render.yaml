@@ -8,6 +8,8 @@ services:
     envVars:
       - key: GEMINI_API_KEY
         sync: false # Render will prompt you to enter the value in the web browser
+      - key: GEMINI_MODEL
+        value: gemini-2.0-flash
 
   # 2. 智慧養殖多知識庫系統 (Port 8001)
   - type: web
@@ -18,3 +20,5 @@ services:
     envVars:
       - key: GEMINI_API_KEY
         sync: false # Render will prompt you to enter the value in the web browser
+      - key: GEMINI_MODEL
+        value: gemini-2.0-flash
