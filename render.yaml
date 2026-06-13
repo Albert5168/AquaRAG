@@ -1,0 +1,22 @@
+services:
+  # 1. 魚類生理學考試系統 (Port 8000)
+  - type: web
+    name: aquarag-exam
+    env: docker
+    plan: free
+    numInstances: 1
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false # Render will prompt you to enter the value in the web browser
+
+  # 2. 智慧養殖多知識庫系統 (Port 8001)
+  - type: web
+    name: aquarag-multi
+    env: docker
+    plan: free
+    numInstances: 1
+    startCommand: uvicorn app_multi:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false # Render will prompt you to enter the value in the web browser
