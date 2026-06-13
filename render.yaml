@@ -4,8 +4,7 @@ services:
     name: aquarag-exam
     env: docker
     plan: free
-    numInstances: 1
-    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    dockerCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: GEMINI_API_KEY
         sync: false # Render will prompt you to enter the value in the web browser
@@ -15,8 +14,7 @@ services:
     name: aquarag-multi
     env: docker
     plan: free
-    numInstances: 1
-    startCommand: uvicorn app_multi:app --host 0.0.0.0 --port $PORT
+    dockerCommand: uvicorn app_multi:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: GEMINI_API_KEY
         sync: false # Render will prompt you to enter the value in the web browser
