@@ -99,7 +99,9 @@ def get_stats():
     db_size_mb = os.path.getsize(db_path) / (1024 * 1024)
     
     if os.getenv("GEMINI_API_KEY"):
-        model_id = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+        model_id = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip().strip('"').strip("'")
+        if model_id.startswith("models/"):
+            model_id = model_id[7:]
         active_model = " ".join([w.capitalize() for w in model_id.split("-")])
         if "Gemini" not in active_model:
             active_model = f"Gemini {active_model}"
@@ -242,7 +244,7 @@ async def sse_chat_generator(message: str, history: List[Dict[str, str]]):
     if gemini_key:
         try:
             genai.configure(api_key=gemini_key)
-            model_id = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+            model_id = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip().strip('"').strip("'")
             model = genai.GenerativeModel(model_id)
             
             # Format history for Gemini chat
