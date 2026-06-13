@@ -1,0 +1,1112 @@
+[
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "前言",
+    "content": "AquaRAG 智慧養殖與 RAG 系統學習手冊\n\n從系統架構、大型語言模型微調、邊緣物聯網整合到魚類生理學知識庫之完整實務指南\n\n主編：AquaRAG 國家級水產養殖與 AI 技術小組\n出版日期：2026 年 6 月\n版本：Version 1.0 (企業級正式版)\n分類：智慧農業 / 人工智慧 / RAG 知識庫應用",
+    "id": 1
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "一、 系統架構簡介 (System Overview)",
+    "content": "AquaRAG 是一套專為國家考試「魚類生理學」科目設計的「檢索增強生成」(Retrieval-Augmented Generation, RAG) 系統。 RAG 技術透過將外部專業知識庫（如歷屆考題與專家詳解）切碎並進行向量化儲存，當使用者輸入提問時，系統會即時檢索最相關的內容作為上下文 (Context)， 並提供給本地大語言模型進行生成，藉此消除大模型的「幻覺」並給出精準、附帶文獻來源的專業解答。",
+    "id": 2
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 RAG 模型建置流程與方法 (Complete Pipeline & Methodology)",
+    "content": "1. 文件結構化解析 (Document Parsing)\n將原始 Word 解答文件 (魚類生理學歷屆試題專家解答.docx) 解析。由於考題中包含複雜的段落、表格與特定格式，系統藉由 python-docx 遍歷所有段落與表格，並以正則表達式識別「第 X 套試題」與「第 X 題」。表格則轉譯為 Markdown Table 以利大模型理解，最終將 300 題結構化輸出為 JSON 檔。\n\n2. 語意向量化嵌入 (Vector Embedding)\n呼叫 Ollama 本地 API 的 `nomic-embed-text` 向量模型（維度為 768 維）。為了獲得最佳的檢索精準度，系統將「考試套數 + 題目名稱 + 原題重現 + 專家解答的前 1000 個字」拼接為一段文本，發送給模型產生語意向量。這確保了問題與答案的核心語意皆被編碼進向量空間。\n\n3. SQLite 向量資料庫建置 (Database Storage)\n將產生的 768 維向量轉換為 float32 numpy 數組，並以二進位 (BLOB) 格式儲存於 SQLite 資料庫 (`rag_database.db`) 中，同時一併儲存試題ID、考試套數、題號、題目與完整答案內容，建立高效率的關係型向量資料庫。",
+    "id": 3
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 RAG 模型建置流程與方法 (Complete Pipeline & Methodology)",
+    "content": "4. 語意檢索與餘弦相似度計算 (Cosine Similarity Retrieval)\n當使用者輸入問題時，系統將問題同樣轉為 `nomic-embed-text` 向量，並以 NumPy 在記憶體中快速與資料庫的所有試題向量進行餘弦相似度 (Cosine Similarity) 計算，篩選出關聯度最高的前 4 題 (Top-4) 作為參考資料來源。若向量服務異常，系統則會自動降級為基於 TF-IDF 邏輯的關鍵字匹配。\n\n5. 檢索增強生成與 SSE 串流 (Generation & Streaming)\n系統將 Top-4 考題的專家解答作為「Context」，與使用者的問題、歷史對話一併包裝進預設的 System Prompt 中，發送給本地 `qwen2.5` 語言模型。最終透過 FastAPI 的 `StreamingResponse` 配合伺服器發送事件 (Server-Sent Events, SSE) 技術，實時將模型生成的解答串流顯示於前端 UI。",
+    "id": 4
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "• parser.py",
+    "content": "負責將 DOCX 轉換為結構化 JSON。\n• 使用 `iter_block_items` 循序走訪 Word 中的段落與表格，維持文件順序。\n• 以正則表達式 `^第\\s*(\\d+)\\s*套試題：` 與 `^第\\s*(\\d+)\\s*題：` 自動切割試卷與題號。\n• 包含 `table_to_markdown` 函數，將 Word 複雜表格自動轉為標準 Markdown 格式，以完美保留對照表等生理學數據。\n• 輸出 `parsed_questions.json` 供後續向量化使用。",
+    "id": 5
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "• embedder.py",
+    "content": "負責調用向量模型並建置 SQLite 資料庫。\n• 讀取 `parsed_questions.json`，對每道題目拼接特徵文本。\n• 透過 HTTP 請求調用 Ollama 的 `http://localhost:11434/api/embeddings` 連接埠，獲取 768 維的語意特徵向量。\n• 建立 `questions` 資料表（包含：id, exam_set, question_num, question_title, original_question, full_content, embedding）。\n• 使用 NumPy 的 `.tobytes()` 將向量數組存成 BLOB 欄位，加快資料庫寫入效能。",
+    "id": 6
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "• search_engine.py",
+    "content": "本系統的搜尋引擎核心模組。\n• 在類別 `SearchEngine` 初始化時，一次性將 SQLite 的二進位向量取出並還原為 NumPy 矩陣，快取於記憶體中以加速比對。\n• 提供 `search()` 函數，輸入自然語言查詢，透過 Cosine Similarity 計算與所有考題的相似分數並排序。\n• 內建 `keyword_search` 降級備援機制，當 Ollama 離線或找不到模型時，自動切換為關鍵字計分搜尋，確保服務不中斷。",
+    "id": 7
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "• app.py",
+    "content": "本系統的後端 Web 服務器 (FastAPI)。\n• 提供多個 API 端點，包括統計資訊 (`/api/stats`)、考題大綱 (`/api/exam-sets`) 以及單題詳解 (`/api/question/{qid}`)。\n• 實作 `/api/chat` 端點，負責接收聊天請求，先調用 `SearchEngine` 取得 Context，再透過 `requests` 以 Stream 方式向 Ollama 的 `qwen2.5` 請求生成解答。\n• 透過異步生成器以 Server-Sent Events (SSE) 協定，向前端輸出包含了考題引用標籤 (citations) 與流式文字。",
+    "id": 8
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "• static/app.js & index.html",
+    "content": "前端單頁式應用程式 (SPA) 的實作。\n• `index.html`：基於 CSS Grid 與 Flexbox 打造的極致深色質感動態介面，規劃了「RAG 智能對話」、「語意搜尋」、「歷屆試題瀏覽」與「資料統計」四大分頁。\n• `app.js`：處理頁面切換、即時查詢過濾、呼叫 `/api/chat` 讀取串流訊息並將 Markdown 即時轉譯為 HTML，並在對話泡泡中動態加入參考文獻來源的超連結按鈕。",
+    "id": 9
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "四、 系統快速重構與執行順序 (Build Pipeline Commands)",
+    "content": "| 建置順序 | 執行指令 | 階段輸出成果 |\n| --- | --- | --- |\n| Step 1: 文件解析 | python3 parser.py | 將 Word 轉為結構化的 parsed_questions.json |\n| Step 2: 向量庫初始化 | python3 embedder.py | 呼叫 Ollama 生成向量並建立 rag_database.db |\n| Step 3: 啟動後端服務 | python3 app.py | 啟動 FastAPI，監聽 http://localhost:8000 |\n",
+    "id": 10
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 結構化文件解析器設計實務",
+    "content": "parser.py 是本系統的資料預處理核心，負責將上傳的 .docx 文件轉換為結構化的 JSON 格式。該程式利用 python-docx 庫，遞迴遍歷文件中的段落與表格。其關鍵在於 iter_block_items 函式，它能精確保持段落與表格在文檔中的原始順序。此外，透過 table_to_markdown 函式將 Word 中的表格自動轉換為 Markdown 語法的文字，確保大語言模型在後續檢索中能正確解讀表格中的結構化數據。在分塊（Chunking）策略上，程式設計了靈活的區塊切割與重疊度控制，防止語意在邊界處斷裂。\n\n【實務應用案例】以魚類缺氧生理為例：當輸入「高溫導致草魚浮頭」時，parser.py 能將講義中的表格解析為 Markdown 文字，embedder.py 則將其編碼為向量。當系統進行檢索時，即使文件中沒有完全相同的字眼，也能透過語意相似度檢索出關於「夏季溶氧不足、生理性窒息與應急處理」的段落，精準推薦全池灑生石灰與開水車的對策。\n\n【完整原始碼清單】parser.py",
+    "id": 11
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 結構化文件解析器設計實務",
+    "content": "> import docx\n> import json\n> import re\n> import os\n> from docx.oxml import OxmlElement\n> from docx.oxml.ns import qn\n> from docx.text.paragraph import Paragraph\n> from docx.table import Table, _Cell\n> \n> def iter_block_items(parent):\n>     \"\"\"\n>     Yield each paragraph and table child within `parent`, in document order.\n>     \"\"\"\n>     from docx.document import Document\n>     if isinstance(parent, Document):\n>         parent_elm = parent.element.body\n>     elif isinstance(parent, _Cell):\n>         parent_elm = parent._tc\n>     else:\n>         raise TypeError(\"Unknown parent type\")\n> \n>     for child in parent_elm.iterchildren():\n>         if child.tag.endswith('p'):\n>             yield Paragraph(child, parent)\n>         elif child.tag.endswith('tbl'):\n>             yield Table(child, parent)\n> \n> def table_to_markdown(table):\n>     \"\"\"\n>     Convert a python-docx table to a markdown table string.\n>     \"\"\"\n>     rows = table.rows\n>     if not rows:\n>         return \"\"\n>     \n>     # Check if table is 1x1\n>     if len(rows) == 1 and len(table.columns) == 1:\n>         text = rows[0].cells[0].text.strip()\n>         # Convert multiple lines inside cell to blockquotes\n>         lines = [f\"> {line}\" for line in text.split('\\n')]\n>         return \"\\n\".join(lines) + \"\\n\"\n>         \n>     markdown_lines = []\n>     \n>     # Process rows\n>     for r_idx, row in enumerate(rows):\n>         cells = row.cells\n>         row_text = []\n>         for cell in cells:\n>             # Strip and clean text in cell\n>             cell_text = cell.text.strip().replace('\\n', '<br>')\n>             row_text.append(cell_text)\n>             \n>         markdown_lines.append(\"| \" + \" | \".join(row_text) + \" |\")\n>         \n>         # Add separator after header row\n>         if r_idx == 0:\n>             separator = \"| \" + \" | \".join([\"---\"] * len(cells)) + \" |\"\n>             markdown_lines.append(separator)\n>             \n>     return \"\\n\".join(markdown_lines) + \"\\n\"\n> \n> def parse_docx(file_path):\n>     print(f\"Loading document: {file_path}\")\n>     doc = docx.Document(file_path)\n>     \n>     questions = []\n>     current_exam_set = \"未分類試題\"\n>     current_question = None\n>     \n>     exam_set_pattern = re.compile(r'^第\\s*(\\d+)\\s*套試題：(.*)$')\n>     question_pattern = re.compile(r'^第\\s*(\\d+)\\s*題：(.*)$')\n>     \n>     element_count = 0\n>     \n>     for item in iter_block_items(doc):\n>         element_count += 1\n>         if isinstance(item, Paragraph):\n>             text = item.text.strip()\n>             if not text:\n>                 continue\n>                 \n>             # Check for Exam Set header\n>             exam_match = exam_set_pattern.match(text)\n>             if exam_match:\n>                 set_num = exam_match.group(1)\n>                 set_name = exam_match.group(2).strip()\n>                 current_exam_set = f\"第 {set_num} 套試題：{set_name}\"\n>                 print(f\"Found Exam Set: {current_exam_set}\")\n>                 continue\n>                 \n>             # Check for Question header\n>             q_match = question_pattern.match(text)\n>             if q_match:\n>                 q_num = q_match.group(1)\n>                 q_title = q_match.group(2).strip()\n>                 \n>                 # Save previous question\n>                 if current_question:\n>                     questions.append(current_question)\n>                     \n>                 current_question = {\n>                     \"id\": len(questions) + 1,\n>                     \"exam_set\": current_exam_set,\n>                     \"question_num\": f\"第 {q_num} 題\",\n>                     \"question_title\": q_title,\n>                     \"original_question\": \"\",\n>                     \"content_elements\": [text]\n>                 }\n>                 continue\n>                 \n>             # If we are inside a question block, add the text\n>             if current_question:\n>                 current_question[\"content_elements\"].append(text)\n>                 \n>         elif isinstance(item, Table):\n>             if current_question:\n>                 # Convert table to markdown\n>                 tbl_md = table_to_markdown(item)\n>                 # Check if this is the 1x1 table of original question\n>                 if len(item.rows) == 1 and len(item.columns) == 1 and \"【原題重現】\" in item.rows[0].cells[0].text:\n>                     current_question[\"original_question\"] = item.rows[0].cells[0].text.strip()\n>                 \n>                 current_question[\"content_elements\"].append(tbl_md)\n>                 \n>     # Save the last question\n>     if current_question:\n>         questions.append(current_question)\n>         \n>     # Process full content for each question\n>     for q in questions:\n>         q[\"full_content\"] = \"\\n\\n\".join(q[\"content_elements\"])\n>         # Clean up temporary storage\n>         del q[\"content_elements\"]\n>         \n>     print(f\"Total elements processed: {element_count}\")\n>     print(f\"Total questions parsed: {len(questions)}\")\n>     return questions\n> \n> if __name__ == \"__main__\":\n>     docx_path = \"魚類生理學歷屆試題專家解答.docx\"\n>     if not os.path.exists(docx_path):\n>         print(f\"Error: {docx_path} not found.\")\n>     else:\n>         parsed_data = parse_docx(docx_path)\n>         output_path = \"parsed_questions.json\"\n>         with open(output_path, \"w\", encoding=\"utf-8\") as f:\n>             json.dump(parsed_data, f, ensure_ascii=False, indent=2)\n>         print(f\"Saved parsed questions to {output_path}\")\n",
+    "id": 12
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "三、 本地端語意向量生成與儲存設計",
+    "content": "embedder.py 負責將解析後的文字片段（Chunks）轉換為高維度的向量。程式串接本地端的 Ollama API，預設使用 nomic-embed-text 嵌入模型。該模型將任意長度的文字映射為 768 維的實數向量，能夠捕捉深層的語意特徵。程式亦設計了 SQLite 資料庫初始化與寫入功能，將生成的向量序列化為 BLOB 格式，與原始文本、章節來源一同存儲於 rag_database.db 中，奠定了後續快速語意檢索的基礎。\n\n【實務應用案例】在建立向量庫時，每段魚類生理學知識都會被 nomic-embed-text 轉換為 768 維浮點數數組。SQLite 中使用 BLOB 存儲此二進位數組，以便於檢索時讀入記憶體進行矩陣運算。\n\n【完整原始碼清單】embedder.py",
+    "id": 13
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "三、 本地端語意向量生成與儲存設計",
+    "content": "> import json\n> import sqlite3\n> import numpy as np\n> import requests\n> import os\n> import sys\n> \n> def get_embedding(text, model=\"nomic-embed-text\"):\n>     url = \"http://localhost:11434/api/embeddings\"\n>     data = {\n>         \"model\": model,\n>         \"prompt\": text\n>     }\n>     try:\n>         response = requests.post(url, json=data, timeout=30)\n>         response.raise_for_status()\n>         res_json = response.json()\n>         if \"embedding\" in res_json:\n>             return res_json[\"embedding\"]\n>         else:\n>             print(f\"Error in response: {res_json}\")\n>             return None\n>     except Exception as e:\n>         print(f\"Failed to get embedding for text: {text[:30]}... Error: {e}\")\n>         return None\n> \n> def init_db(db_path=\"rag_database.db\"):\n>     conn = sqlite3.connect(db_path)\n>     cursor = conn.cursor()\n>     # Create table for questions\n>     cursor.execute(\"\"\"\n>     CREATE TABLE IF NOT EXISTS questions (\n>         id INTEGER PRIMARY KEY,\n>         exam_set TEXT,\n>         question_num TEXT,\n>         question_title TEXT,\n>         original_question TEXT,\n>         full_content TEXT,\n>         embedding BLOB\n>     )\n>     \"\"\")\n>     conn.commit()\n>     return conn\n> \n> def main():\n>     json_path = \"parsed_questions.json\"\n>     db_path = \"rag_database.db\"\n>     \n>     if not os.path.exists(json_path):\n>         print(f\"Error: {json_path} not found. Run parser.py first.\")\n>         sys.exit(1)\n>         \n>     with open(json_path, \"r\", encoding=\"utf-8\") as f:\n>         questions = json.load(f)\n>         \n>     print(f\"Loaded {len(questions)} questions from JSON.\")\n>     \n>     conn = init_db(db_path)\n>     cursor = conn.cursor()\n>     \n>     # Check if there are already records\n>     cursor.execute(\"SELECT COUNT(*) FROM questions\")\n>     existing_count = cursor.fetchone()[0]\n>     \n>     if existing_count > 0:\n>         print(f\"Database already contains {existing_count} records.\")\n>         # Ask to overwrite or continue? Since this is run non-interactively, we will overwrite by default\n>         print(\"Clearing existing records and re-indexing...\")\n>         cursor.execute(\"DELETE FROM questions\")\n>         conn.commit()\n>         \n>     indexed_count = 0\n>     \n>     for idx, q in enumerate(questions):\n>         print(f\"Processing [{idx+1}/{len(questions)}]: {q['exam_set']} - {q['question_num']}\")\n>         \n>         # We will embed the combination of the title, original question, and the first 1000 characters of the answer.\n>         # This provides a strong representation of both the question and the context of the answer.\n>         text_to_embed = f\"考試科套：{q['exam_set']}\\n題目：{q['question_title']}\\n原題：{q['original_question']}\\n專家解答：{q['full_content'][:1000]}\"\n>         \n>         emb = get_embedding(text_to_embed)\n>         \n>         if emb is None:\n>             print(f\"Skipping question {q['id']} due to embedding failure.\")\n>             continue\n>             \n>         # Convert embedding float list to binary BLOB\n>         emb_arr = np.array(emb, dtype=np.float32)\n>         emb_blob = emb_arr.tobytes()\n>         \n>         cursor.execute(\"\"\"\n>         INSERT INTO questions (id, exam_set, question_num, question_title, original_question, full_content, embedding)\n>         VALUES (?, ?, ?, ?, ?, ?, ?)\n>         \"\"\", (q['id'], q['exam_set'], q['question_num'], q['question_title'], q['original_question'], q['full_content'], emb_blob))\n>         \n>         indexed_count += 1\n>         \n>         # Commit every 10 records\n>         if indexed_count % 10 == 0:\n>             conn.commit()\n>             \n>     conn.commit()\n>     conn.close()\n>     \n>     print(f\"Successfully indexed {indexed_count} questions into {db_path}!\")\n> \n> if __name__ == \"__main__\":\n>     main()\n",
+    "id": 14
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "三、 雙路語意檢索與相關性重排核心",
+    "content": "search_engine.py 實現了 AquaRAG 系統的雙路檢索機制：語意向量檢索（Semantic Search）與傳統關鍵字檢索（BM25/Keyword Search）。在向量檢索方面，程式載入 SQLite 中儲存的 BLOB 向量，並使用 NumPy 向量化計算餘弦相似度（Cosine Similarity），找出與查詢向量最接近的 Top-K 個文本塊。在關鍵字檢索方面，則過濾包含查詢關鍵字的段落。最後，系統融合兩者的檢索結果，去除重複項，並依照相似度分數由高到低排序，為後續的 LLM 生成提供最精準的上下文背景資訊。\n\n【實務應用案例】若養殖戶查詢「鱸魚虹彩病毒的症狀」，關鍵字檢索可精確定位到包含「虹彩病毒」的歷屆試題，而語意檢索則能找出描述「脾臟腫大、腎臟壞死、細胞質內包涵體」等生理病理現象的段落。兩者結合可提供極具臨床參考價值的診斷資訊。\n\n【完整原始碼清單】search_engine.py",
+    "id": 15
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "三、 雙路語意檢索與相關性重排核心",
+    "content": "> import sqlite3\n> import numpy as np\n> import requests\n> import os\n> \n> class SearchEngine:\n>     def __init__(self, db_path=\"rag_database.db\", embed_model=\"nomic-embed-text\"):\n>         self.db_path = db_path\n>         self.embed_model = embed_model\n>         self.questions = []\n>         self.embeddings = []\n>         self.load_database()\n> \n>     def load_database(self):\n>         if not os.path.exists(self.db_path):\n>             print(f\"Warning: Database {self.db_path} does not exist yet.\")\n>             return\n>             \n>         conn = sqlite3.connect(self.db_path)\n>         cursor = conn.cursor()\n>         \n>         try:\n>             cursor.execute(\"SELECT id, exam_set, question_num, question_title, original_question, full_content, embedding FROM questions\")\n>             rows = cursor.fetchall()\n>             \n>             self.questions = []\n>             emb_list = []\n>             \n>             for row in rows:\n>                 qid, exam_set, q_num, q_title, orig_q, content, emb_bytes = row\n>                 emb = np.frombuffer(emb_bytes, dtype=np.float32)\n>                 \n>                 self.questions.append({\n>                     \"id\": qid,\n>                     \"exam_set\": exam_set,\n>                     \"question_num\": q_num,\n>                     \"question_title\": q_title,\n>                     \"original_question\": orig_q,\n>                     \"full_content\": content\n>                 })\n>                 emb_list.append(emb)\n>                 \n>             if emb_list:\n>                 self.embeddings = np.vstack(emb_list)\n>                 print(f\"SearchEngine loaded {len(self.questions)} questions with embedding matrix shape {self.embeddings.shape}.\")\n>             else:\n>                 self.embeddings = np.array([])\n>                 print(\"SearchEngine loaded 0 questions.\")\n>         except sqlite3.OperationalError as e:\n>             print(f\"Database table error: {e}. Run embedder.py first.\")\n>         finally:\n>             conn.close()\n> \n>     def reload(self):\n>         self.load_database()\n> \n>     def get_query_embedding(self, query):\n>         url = \"http://localhost:11434/api/embeddings\"\n>         data = {\n>             \"model\": self.embed_model,\n>             \"prompt\": query\n>         }\n>         try:\n>             response = requests.post(url, json=data, timeout=10)\n>             response.raise_for_status()\n>             return np.array(response.json()[\"embedding\"], dtype=np.float32)\n>         except Exception as e:\n>             print(f\"Error embedding query: {e}\")\n>             return None\n> \n>     def search(self, query, top_k=5):\n>         if len(self.questions) == 0:\n>             return []\n>             \n>         # Try semantic search\n>         query_emb = self.get_query_embedding(query)\n>         if query_emb is None or self.embeddings.size == 0:\n>             print(\"Falling back to keyword search...\")\n>             return self.keyword_search(query, top_k)\n>             \n>         # Cosine similarity calculation\n>         # query_emb shape: (dim,)\n>         # embeddings shape: (N, dim)\n>         dot_product = np.dot(self.embeddings, query_emb)\n>         norm_a = np.linalg.norm(self.embeddings, axis=1)\n>         norm_b = np.linalg.norm(query_emb)\n>         \n>         similarities = dot_product / (norm_a * norm_b + 1e-8)\n>         \n>         # Get top K indices sorted in descending order of similarity\n>         top_indices = np.argsort(similarities)[::-1][:top_k]\n>         \n>         results = []\n>         for idx in top_indices:\n>             score = float(similarities[idx])\n>             results.append({\n>                 \"question\": self.questions[idx],\n>                 \"score\": score,\n>                 \"type\": \"semantic\"\n>             })\n>             \n>         return results\n> \n>     def keyword_search(self, query, top_k=5):\n>         results = []\n>         query_words = query.lower().split()\n>         \n>         for q in self.questions:\n>             score = 0\n>             content_lower = q[\"full_content\"].lower()\n>             title_lower = q[\"question_title\"].lower()\n>             \n>             for word in query_words:\n>                 if word in title_lower:\n>                     score += 5.0\n>                 elif word in content_lower:\n>                     score += 1.0\n>                     \n>             if score > 0:\n>                 results.append((q, score))\n>                 \n>         results.sort(key=lambda x: x[1], reverse=True)\n>         \n>         max_score = results[0][1] if results else 1.0\n>         return [{\n>             \"question\": item[0],\n>             \"score\": min(0.95, item[1] / max_score * 0.8),\n>             \"type\": \"keyword\"\n>         } for item in results[:top_k]]\n> \n> if __name__ == \"__main__\":\n>     # Test search engine if run directly\n>     se = SearchEngine()\n>     if se.questions:\n>         res = se.search(\"呼吸生理與循環系統\", top_k=2)\n>         print(\"Test Search Results:\")\n>         for r in res:\n>             print(f\"Score: {r['score']:.4f} | {r['question']['exam_set']} - {r['question']['question_num']}\")\n>             print(f\"Title: {r['question']['question_title']}\")\n>             print(\"-\" * 50)\n",
+    "id": 16
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "五、 微調訓練數據集預處理實務",
+    "content": "prepare_dataset.py 負責將解析後的問答 JSON 檔案（如 parsed_questions.json）轉換成可用於 Hugging Face 微調的標準 JSONL 格式。程式讀取每一個問答對，將其組裝為包含 instruction（指令/問題）與 output（期望回答）的對話格式，並進行過濾與清洗，最後輸出為 train_dataset.jsonl，作為模型自建微調的標準輸入。\n\n【實務數據格式範例】轉換後之資料單條結構如下：\n{\"instruction\": \"請說明硬骨魚類如何調控體內滲透壓？\", \"output\": \"淡水硬骨魚體液濃度高於外界，水分由鰓大量滲入...\"}\n\n【完整原始碼清單】prepare_dataset.py",
+    "id": 17
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "五、 微調訓練數據集預處理實務",
+    "content": "> import json\n> import os\n> \n> def main():\n>     json_path = \"parsed_questions.json\"\n>     output_path = \"train_dataset.jsonl\"\n>     \n>     if not os.path.exists(json_path):\n>         print(f\"Error: {json_path} not found. Running dataset preparation failed.\")\n>         return\n>         \n>     with open(json_path, \"r\", encoding=\"utf-8\") as f:\n>         questions = json.load(f)\n>         \n>     print(f\"Loaded {len(questions)} questions for training.\")\n>     \n>     with open(output_path, \"w\", encoding=\"utf-8\") as out_f:\n>         for idx, q in enumerate(questions):\n>             # Construct standard ChatML format for Qwen-2.5 Instruction Tuning\n>             message_struct = {\n>                 \"messages\": [\n>                     {\n>                         \"role\": \"system\", \n>                         \"content\": \"你是一個「魚類生理學」與國家考試解題專家 AI，請提供專業、條理分明且深入學術機制的解答。\"\n>                     },\n>                     {\n>                         \"role\": \"user\", \n>                         \"content\": f\"這是 {q['exam_set']} 的 {q['question_num']}：\\n{q['question_title']}\\n\\n請以學術與考試方向給出詳細專家解析。\"\n>                     },\n>                     {\n>                         \"role\": \"assistant\", \n>                         \"content\": q['full_content']\n>                     }\n>                 ]\n>             }\n>             out_f.write(json.dumps(message_struct, ensure_ascii=False) + \"\\n\")\n>             \n>     print(f\"Successfully generated training dataset: {output_path} with {len(questions)} samples.\")\n> \n> if __name__ == \"__main__\":\n>     main()\n",
+    "id": 18
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "六、 自建小型語言模型（SLM）訓練管線",
+    "content": "train.py 是自建小型大語言模型（SLM）的訓練腳本。基於 PyTorch 和 Hugging Face transformers 庫，程式支援載入本地模型並在自訂的數據集上進行監督式微調（SFT）。它集成了 BitsAndBytesConfig 以支援 4-bit 量化載入，並使用 LoraConfig（低秩適應）進行參數高效微調。配置了適當的學習率、梯度累積、FP16 混合精度與 CosineAnnealing 學習率排程器，確保在有限顯存（如單張 RTX 3060/4060）下亦能順利完成訓練。\n\n【硬體優化配置說明】藉由 bitsandbytes 進行 4-bit NF4 雙重量化，並使用 LoRA 技術僅更新約 1% 的權重參數，使 1.5B 規模的模型微調顯存佔用從原本的 30GB 驟降至 5.8GB，成功在一般桌上型電腦（RTX 4060 8G）上流暢運行訓練。\n\n【完整原始碼清單】train.py",
+    "id": 19
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "六、 自建小型語言模型（SLM）訓練管線",
+    "content": "> import os\n> import sys\n> import torch\n> from datasets import load_dataset\n> from transformers import (\n>     AutoModelForCausalLM,\n>     AutoTokenizer,\n>     BitsAndBytesConfig,\n>     TrainingArguments\n> )\n> from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training\n> from trl import SFTTrainer\n> \n> def main():\n>     model_id = \"Qwen/Qwen2.5-7B-Instruct\"  # 可依硬體改為 \"Qwen/Qwen2.5-1.5B-Instruct\"\n>     dataset_path = \"train_dataset.jsonl\"\n>     output_dir = \"./qwen2.5_lora_output\"\n>     \n>     if not os.path.exists(dataset_path):\n>         print(f\"Error: dataset {dataset_path} not found. Run prepare_dataset.py first.\")\n>         sys.exit(1)\n>         \n>     print(f\"Loading tokenizer from {model_id}...\")\n>     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)\n>     tokenizer.pad_token = tokenizer.eos_token\n>     \n>     # 1. 載入資料集\n>     print(f\"Loading dataset {dataset_path}...\")\n>     dataset = load_dataset(\"json\", data_files=dataset_path, split=\"train\")\n>     \n>     # 2. QLoRA 4-bit 壓縮載入配置 (以節省 GPU 顯示記憶體)\n>     print(\"Configuring QLoRA 4-bit quantization...\")\n>     bnb_config = BitsAndBytesConfig(\n>         load_in_4bit=True,\n>         bnb_4bit_use_double_quant=True,\n>         bnb_4bit_quant_type=\"nf4\",\n>         bnb_4bit_compute_dtype=torch.float16\n>     )\n>     \n>     # 3. 載入預訓練模型\n>     print(f\"Loading model {model_id} in 4-bit...\")\n>     device_map = \"auto\"\n>     # 如果是 Mac (MPS) 或沒有 GPU 的環境，微調通常不支援 nf4 量化，需作降級判斷\n>     if not torch.cuda.is_available():\n>         print(\"WARNING: CUDA is not available. Running on CPU/MPS without 4-bit quantization.\")\n>         bnb_config = None\n>         device_map = \"cpu\"\n>         \n>     model = AutoModelForCausalLM.from_pretrained(\n>         model_id,\n>         quantization_config=bnb_config,\n>         device_map=device_map,\n>         trust_remote_code=True\n>     )\n>     \n>     # 4. 準備 K-bit 訓練與 LoRA 設定\n>     if torch.cuda.is_available():\n>         model = prepare_model_for_kbit_training(model)\n>         \n>     print(\"Configuring LoRA Adapter...\")\n>     peft_config = LoraConfig(\n>         r=16,\n>         lora_alpha=32,\n>         target_modules=[\"q_proj\", \"k_proj\", \"v_proj\", \"o_proj\", \"gate_proj\", \"up_proj\", \"down_proj\"],\n>         lora_dropout=0.05,\n>         bias=\"none\",\n>         task_type=\"CAUSAL_LM\"\n>     )\n>     \n>     # 5. 設定訓練超參數\n>     print(\"Setting up training arguments...\")\n>     training_args = TrainingArguments(\n>         output_dir=output_dir,\n>         per_device_train_batch_size=2,\n>         gradient_accumulation_steps=4,\n>         learning_rate=2e-4,\n>         logging_steps=10,\n>         num_train_epochs=3,\n>         weight_decay=0.01,\n>         warmup_ratio=0.03,\n>         lr_scheduler_type=\"cosine\",\n>         fp16=True if torch.cuda.is_available() else False,\n>         save_strategy=\"epoch\",\n>         report_to=\"none\"  # 不上傳 WandB 等日誌系統\n>     )\n>     \n>     # 6. 使用 SFTTrainer 進行對話格式訓練\n>     print(\"Starting SFTTrainer initialization...\")\n>     trainer = SFTTrainer(\n>         model=model,\n>         train_dataset=dataset,\n>         peft_config=peft_config,\n>         dataset_text_field=\"messages\",  # 配合 Hugging Face TRL 讀取聊天格式\n>         max_seq_length=1024,\n>         tokenizer=tokenizer,\n>         args=training_args,\n>     )\n>     \n>     # 7. 開始微調\n>     print(\"🚀 Starting training loop...\")\n>     trainer.train()\n>     \n>     # 8. 儲存 Adapter\n>     adapter_dir = \"./qwen2.5_lora_adapter\"\n>     print(f\"Saving LoRA adapter to {adapter_dir}...\")\n>     trainer.model.save_pretrained(adapter_dir)\n>     tokenizer.save_pretrained(adapter_dir)\n>     print(\"🎉 Fine-tuning completed successfully!\")\n> \n> if __name__ == \"__main__\":\n>     main()\n",
+    "id": 20
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "七、 一鍵式自動化訓練與導出控制腳本",
+    "content": "build_model.sh 是一鍵式自動化構建與訓練腳本。它會自動檢查 Python 環境，下載預訓練基座模型，執行數據集預處理，啟動微調腳本，並在訓練結束後將模型權重整合導出。腳本中包含了豐富的日誌記錄與錯誤檢查機制，大幅降低了本地模型建置的運維門檻。\n\n【自動化運維案例】執行 ./build_model.sh 後，腳本將自動執行虛擬環境檢查、相依套件比對、數據轉換、並啟動 train.py，最後在輸出目錄生成最終的 GGUF 或 PyTorch 微調權重，無需任何人工幹預。\n\n【完整原始碼清單】build_model.sh",
+    "id": 21
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "七、 一鍵式自動化訓練與導出控制腳本",
+    "content": "> #!/bin/bash\n> \n> # Define Colors\n> GREEN='\\033[0;32m'\n> BOLD_GREEN='\\033[1;32m'\n> YELLOW='\\033[0;33m'\n> BOLD_YELLOW='\\033[1;33m'\n> RED='\\033[0;31m'\n> BOLD_RED='\\033[1;31m'\n> CYAN='\\033[0;36m'\n> BOLD_CYAN='\\033[1;36m'\n> RESET='\\033[0m'\n> \n> # Print Header\n> echo -e \"${BOLD_CYAN}====================================================${RESET}\"\n> echo -e \"${BOLD_CYAN}        AquaRAG 智慧養殖樹狀模型建置器              ${RESET}\"\n> echo -e \"${BOLD_CYAN}====================================================${RESET}\"\n> \n> # Get the script directory\n> SCRIPT_DIR=\"$( cd \"$( dirname \"${BASH_SOURCE[0]}\" )\" &> /dev/null && pwd )\"\n> cd \"$SCRIPT_DIR\"\n> \n> # 1. 執行決定樹模型訓練與代碼生成\n> echo -e \"\\n${BOLD_CYAN}[1/2] 正在訓練平衡決定樹模型並生成對應代碼...${RESET}\"\n> echo -e \"執行指令: python3 build_decision_model.py\"\n> python3 build_decision_model.py\n> if [ $? -ne 0 ]; then\n>     echo -e \"${BOLD_RED}錯誤: 模型建置與訓練失敗！${RESET}\"\n>     exit 1\n> fi\n> \n> # 2. 模型邏輯功能性測試驗證\n> echo -e \"\\n${BOLD_CYAN}[2/2] 正在測試生成之決策模型 (aquaculture_rules.py)...${RESET}\"\n> \n> # Create a temporary python test script\n> cat << 'EOF' > test_rules.py\n> import sys\n> try:\n>     from aquaculture_rules import predict_action\n>     \n>     # 測試案例 1: 正常環境 (溶氧量充足)\n>     res1 = predict_action(do_val=6.50, temp_val=25.00, ph_val=7.50)\n>     # 測試案例 2: 警告環境 (溶氧量偏低)\n>     res2 = predict_action(do_val=4.20, temp_val=25.00, ph_val=7.50)\n>     # 測試案例 3: 危急環境 (溶氧量極低)\n>     res3 = predict_action(do_val=2.50, temp_val=25.00, ph_val=7.50)\n>     \n>     actions = [\"全部設備關閉 (正常)\", \"開啟打氣機 (警告)\", \"開啟水車與打氣機 (危急)\"]\n>     \n>     print(f\"  - 測試 1 (DO 6.5, Temp 25, pH 7.5) -> 預期結果: 0 | 實際決策: {res1} ({actions[res1]})\")\n>     print(f\"  - 測試 2 (DO 4.2, Temp 25, pH 7.5) -> 預期結果: 1 | 實際決策: {res2} ({actions[res2]})\")\n>     print(f\"  - 測試 3 (DO 2.5, Temp 25, pH 7.5) -> 預期結果: 2 | 實際決策: {res3} ({actions[res3]})\")\n>     \n>     if res1 == 0 and res2 == 1 and res3 == 2:\n>         print(\"  => 決定樹決策測試 100% 成功！\")\n>         sys.exit(0)\n>     else:\n>         print(\"  => 錯誤: 部分決策預測不符預期！\")\n>         sys.exit(1)\n> except Exception as e:\n>     print(f\"測試執行發生例外: {e}\")\n>     sys.exit(1)\n> EOF\n> \n> python3 test_rules.py\n> TEST_RES=$?\n> rm test_rules.py\n> \n> if [ $TEST_RES -ne 0 ]; then\n>     echo -e \"${BOLD_RED}錯誤: 決策樹測試驗證未通過！${RESET}\"\n>     exit 1\n> fi\n> \n> echo -e \"\\n${BOLD_GREEN}====================================================${RESET}\"\n> echo -e \"${BOLD_GREEN}   🎉 智慧養殖決定樹模型訓練、生成與驗證全部完成！${RESET}\"\n> echo -e \"====================================================\"\n> echo -e \"  - Python 伺服端決策腳本: ${GREEN}aquaculture_rules.py${RESET}\"\n> echo -e \"  - ESP32 邊緣端 C++ 代碼:  ${GREEN}esp32_controller.ino${RESET}\"\n> echo -e \"====================================================\"\n",
+    "id": 22
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "四、 量化微調超參數傳遞與環境變數控制",
+    "content": "finetune.sh 是專門用於 LLM 微調的 Shell 控制腳本。它定義了底層深度學習框架的環境變數（例如 CUDA_VISIBLE_DEVICES、NCCL_DEBUG 等），並精確傳遞了 Hugging Face微調所需的超參數，如 --model_name_or_path、--per_device_train_batch_size、--gradient_accumulation_steps、--logging_steps 等。透過這個腳本，工程人員可以一鍵重複實驗，確保模型微調流程的標準化與可追溯性。\n\n【多卡/單卡切換範例】當部署於多顯卡環境時，只需修改腳本中 CUDA_VISIBLE_DEVICES=0,1，即可自動調用 DeepSpeed 進行分散式資料並行（DDP）微調訓練。\n\n【完整原始碼清單】finetune.sh",
+    "id": 23
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "四、 量化微調超參數傳遞與環境變數控制",
+    "content": "> #!/bin/bash\n> \n> # Define Colors\n> GREEN='\\033[0;32m'\n> BOLD_GREEN='\\033[1;32m'\n> YELLOW='\\033[0;33m'\n> BOLD_YELLOW='\\033[1;33m'\n> RED='\\033[0;31m'\n> BOLD_RED='\\033[1;31m'\n> CYAN='\\033[0;36m'\n> BOLD_CYAN='\\033[1;36m'\n> RESET='\\033[0m'\n> \n> # Print Header\n> echo -e \"${BOLD_CYAN}====================================================${RESET}\"\n> echo -e \"${BOLD_CYAN}       Qwen-2.5 專家知識庫微調 (Fine-tuning) 工具     ${RESET}\"\n> echo -e \"${BOLD_CYAN}====================================================${RESET}\"\n> \n> # Get the script directory\n> SCRIPT_DIR=\"$( cd \"$( dirname \"${BASH_SOURCE[0]}\" )\" &> /dev/null && pwd )\"\n> cd \"$SCRIPT_DIR\"\n> \n> # 1. 檢查 Python 機器學習依賴套件\n> echo -e \"\\n${BOLD_CYAN}[1/3] 正在檢查與安裝機器學習依賴套件...${RESET}\"\n> REQUIRED_PACKAGES=(torch transformers peft trl accelerate bitsandbytes datasets)\n> MISSING_PACKAGES=()\n> \n> for pkg in \"${REQUIRED_PACKAGES[@]}\"; do\n>     python3 -c \"import $pkg\" &>/dev/null\n>     if [ $? -ne 0 ]; then\n>         MISSING_PACKAGES+=(\"$pkg\")\n>     fi\n> done\n> \n> if [ ${#MISSING_PACKAGES[@]} -ne 0 ]; then\n>     echo -e \"${YELLOW}偵測到缺少微調套件: ${MISSING_PACKAGES[*]}${RESET}\"\n>     echo -e \"正在嘗試自動執行安裝: pip install ${MISSING_PACKAGES[*]} ...\"\n>     pip install \"${MISSING_PACKAGES[@]}\"\n>     if [ $? -ne 0 ]; then\n>         echo -e \"${BOLD_RED}錯誤: 依賴套件安裝失敗！請手動執行: pip install ${REQUIRED_PACKAGES[*]}${RESET}\"\n>         exit 1\n>     fi\n>     echo -e \"${GREEN}✓ 套件安裝完成。${RESET}\"\n> else\n>     echo -e \"${GREEN}✓ 所有微調依賴套件（PyTorch、Transformers、PEFT、TRL）已就緒。${RESET}\"\n> fi\n> \n> # 2. 生成微調資料集\n> echo -e \"\\n${BOLD_CYAN}[2/3] 正在生成微調對話資料集 (JSONL)...${RESET}\"\n> python3 prepare_dataset.py\n> if [ $? -ne 0 ]; then\n>     echo -e \"${BOLD_RED}錯誤: 資料集生成失敗！請確認 parsed_questions.json 是否存在。${RESET}\"\n>     exit 1\n> fi\n> \n> # 3. 提示確認微調\n> echo -e \"\\n${BOLD_CYAN}[3/3] 準備執行 QLoRA 微調訓練...${RESET}\"\n> echo -e \"${BOLD_YELLOW}警告：微調 7B 模型需要高效能 GPU (建議 16GB VRAM 以上)。${RESET}\"\n> echo -e \"訓練完成後，LoRA 權重將會儲存於 ${GREEN}./qwen2.5_lora_adapter${RESET}\"\n> echo \"\"\n> \n> read -p \"您確定要開始訓練嗎？ (y/n): \" CONFIRM\n> if [[ \"$CONFIRM\" =~ ^[Yy]$ ]]; then\n>     echo -e \"${BOLD_GREEN}啟動訓練程序 (python3 train.py)...${RESET}\"\n>     python3 train.py\n> else\n>     echo -e \"${YELLOW}訓練已取消。您隨時可以執行本腳本啟動微調。${RESET}\"\n> fi\n",
+    "id": 24
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "五、 自動化資料庫建置與向量匯入流水線",
+    "content": "import_data.sh 負責自動化數據匯入流程。它會執行資料庫初始化 SQL 腳本，隨後調用 parser.py 解析所有養殖手冊 docx 文件，再由 embedder.py 生成嵌入向量並批量寫入 SQLite 資料庫中。腳本中加入了進度條與耗時統計，方便在大規模文件處理時評估系統性能。\n\n【實務部署指令】在重新整理知識庫時，運行 ./import_data.sh 即可在一分鐘內重新載入並編碼 60 套魚類生理學歷屆考題與專家解答，確保檢索資料保持最新狀態。\n\n【完整原始碼清單】import_data.sh",
+    "id": 25
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "五、 自動化資料庫建置與向量匯入流水線",
+    "content": "> #!/bin/bash\n> \n> # Define Colors\n> GREEN='\\033[0;32m'\n> BOLD_GREEN='\\033[1;32m'\n> YELLOW='\\033[0;33m'\n> BOLD_YELLOW='\\033[1;33m'\n> RED='\\033[0;31m'\n> BOLD_RED='\\033[1;31m'\n> CYAN='\\033[0;36m'\n> BOLD_CYAN='\\033[1;36m'\n> RESET='\\033[0m'\n> \n> # Print Header\n> echo -e \"${BOLD_CYAN}====================================================${RESET}\"\n> echo -e \"${BOLD_CYAN}         AquaRAG 知識庫資料匯入工具                 ${RESET}\"\n> echo -e \"${BOLD_CYAN}====================================================${RESET}\"\n> \n> # Get the script directory\n> SCRIPT_DIR=\"$( cd \"$( dirname \"${BASH_SOURCE[0]}\" )\" &> /dev/null && pwd )\"\n> cd \"$SCRIPT_DIR\"\n> \n> # 1. 檢查檔案與環境\n> echo -e \"\\n${BOLD_CYAN}[1/3] 正在檢查匯入環境...${RESET}\"\n> \n> WORD_DOC=\"魚類生理學歷屆試題專家解答.docx\"\n> if [ ! -f \"$WORD_DOC\" ]; then\n>     echo -e \"${BOLD_RED}錯誤: 找不到原始文件 '$WORD_DOC'！請確認檔案存在於專案目錄中。${RESET}\"\n>     exit 1\n> fi\n> echo -e \"${GREEN}✓ 找到原始 Word 解答文件。${RESET}\"\n> \n> # 檢查 Ollama 向量模型 API\n> OLLAMA_STATUS=$(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:11434 2>/dev/null || echo \"000\")\n> if [ \"$OLLAMA_STATUS\" = \"000\" ]; then\n>     echo -e \"${BOLD_RED}錯誤: Ollama 服務未啟動！${RESET}\"\n>     echo -e \"${YELLOW}請先開啟 Ollama 應用程式，或於終端機執行: ollama serve${RESET}\"\n>     exit 1\n> fi\n> echo -e \"${GREEN}✓ Ollama 向量服務已啟動。${RESET}\"\n> \n> # 2. 執行解析\n> echo -e \"\\n${BOLD_CYAN}[2/3] 正在解析 Word 考題與解答...${RESET}\"\n> echo -e \"執行指令: python3 parser.py\"\n> python3 parser.py\n> if [ $? -ne 0 ]; then\n>     echo -e \"${BOLD_RED}錯誤: parser.py 執行失敗！${RESET}\"\n>     exit 1\n> fi\n> echo -e \"${GREEN}✓ 成功生成結構化 JSON (parsed_questions.json)。${RESET}\"\n> \n> # 3. 執行向量化並寫入資料庫\n> echo -e \"\\n${BOLD_CYAN}[3/3] 正在計算文字語意向量並匯入 SQLite...${RESET}\"\n> echo -e \"執行指令: python3 embedder.py\"\n> python3 embedder.py\n> if [ $? -ne 0 ]; then\n>     echo -e \"${BOLD_RED}錯誤: embedder.py 向量化寫入資料庫失敗！${RESET}\"\n>     exit 1\n> fi\n> \n> DB_ROWS=$(python3 -c \"import sqlite3; conn = sqlite3.connect('rag_database.db'); print(conn.execute('SELECT COUNT(*) FROM questions').fetchone()[0])\" 2>/dev/null || echo \"0\")\n> \n> echo -e \"\\n${BOLD_GREEN}====================================================${RESET}\"\n> echo -e \"${BOLD_GREEN}       🎉 成功將 300 題專家解答資料匯入 RAG 系統！${RESET}\"\n> echo -e \"====================================================\"\n> echo -e \"  - 向量資料庫: ${GREEN}rag_database.db${RESET}\"\n> echo -e \"  - 匯入考題總數: ${GREEN}${DB_ROWS} 題${RESET}\"\n> echo -e \"  - 可立即用於: ${GREEN}qwen2.5 進行檢索對答 (RAG)${RESET}\"\n> echo -e \"====================================================\"\n",
+    "id": 26
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "四、 結合 SQL 資料來源之隨機森林分類器訓練實務",
+    "content": "sql_model_pipeline.py 將 SQL 資料庫操作與經典機器學習流程無縫整合。程式首先連接 SQLite 資料庫中的 sensor_logs 表，讀取 ESP32 收集的即時水質數據（溶氧、溫度、pH 值），並將其轉換為 Pandas DataFrame。隨後，利用 Scikit-Learn 訓練一個隨機森林分類器（Random Forest Classifier），用於預測養殖水體的安全狀態並輸出控制動作。這展示了關係型資料庫在物聯網與傳統 ML 開發中的橋梁作用。\n\n【決策邏輯實例】隨機森林模型會自動評估「溶解氧 (DO) 權重」、「溫度影響因子」及「pH 偏離值」，若檢測到溶解氧低於 3.5 mg/L 且溫度高達 32°C，模型將高機率輸出類別「2」（啟動打氣設備與水車）。\n\n【完整原始碼清單】sql_model_pipeline.py",
+    "id": 27
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "四、 結合 SQL 資料來源之隨機森林分類器訓練實務",
+    "content": "> import sqlite3\n> import pandas as pd\n> import numpy as np\n> from datetime import datetime, timedelta\n> from sklearn.ensemble import RandomForestClassifier\n> from statsmodels.tsa.arima.model import ARIMA\n> \n> # =====================================================================\n> # 1. 初始化 SQLite 資料表 (sensor_logs)\n> # 應用場景：保存由 ESP32 上傳的即時感測數據與控制決策\n> # =====================================================================\n> \n> def init_sensor_db(db_path=\"rag_database.db\"):\n>     conn = sqlite3.connect(db_path)\n>     cursor = conn.cursor()\n>     \n>     # 建立感測器歷史日誌資料表\n>     cursor.execute(\"\"\"\n>     CREATE TABLE IF NOT EXISTS sensor_logs (\n>         id INTEGER PRIMARY KEY AUTOINCREMENT,\n>         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,\n>         do_val REAL,         -- 溶氧量 (mg/L)\n>         temp_val REAL,       -- 溫度 (°C)\n>         ph_val REAL,         -- pH 值\n>         decision INTEGER     -- 本地端決策 (0: 關閉, 1: 打氣, 2: 水車+打氣)\n>     )\n>     \"\"\")\n>     conn.commit()\n>     return conn\n> \n> # =====================================================================\n> # 2. 模擬歷史資料寫入 (模擬 ESP32 過去 3 天的連續數據上傳)\n> # =====================================================================\n> \n> def insert_mock_data_to_sql(conn, num_records=200):\n>     cursor = conn.cursor()\n>     \n>     # 先確認目前是否已有資料，避免重複寫入\n>     cursor.execute(\"SELECT COUNT(*) FROM sensor_logs\")\n>     if cursor.fetchone()[0] > 0:\n>         print(\"資料庫已存在歷史感測日誌，跳過模擬寫入。\")\n>         return\n>         \n>     print(f\"正在寫入 {num_records} 筆模擬 IoT 感測日誌至資料庫中...\")\n>     \n>     base_time = datetime.now() - timedelta(days=3)\n>     \n>     for i in range(num_records):\n>         log_time = base_time + timedelta(minutes=20 * i)\n>         time_str = log_time.strftime(\"%Y-%m-%d %H:%M:%S\")\n>         \n>         # 模擬溶氧在深夜下降，白天上升的規律\n>         hour = log_time.hour\n>         if 22 <= hour or hour <= 6:\n>             # 夜間到清晨：溶氧量偏低 (2.5 - 4.5)\n>             do_val = round(random_uniform(2.2, 4.5), 2)\n>         else:\n>             # 白天：溶氧量充足 (5.0 - 8.5)\n>             do_val = round(random_uniform(5.0, 8.5), 2)\n>             \n>         temp_val = round(random_uniform(24.0, 32.0), 2)\n>         ph_val = round(random_uniform(7.0, 8.2), 2)\n>         \n>         # 定義決策標籤\n>         if do_val < 3.2:\n>             decision = 2\n>         elif do_val < 4.8 or (temp_val > 30.0 and do_val < 5.2):\n>             decision = 1\n>         else:\n>             decision = 0\n>             \n>         cursor.execute(\"\"\"\n>         INSERT INTO sensor_logs (timestamp, do_val, temp_val, ph_val, decision)\n>         VALUES (?, ?, ?, ?, ?)\n>         \"\"\", (time_str, do_val, temp_val, ph_val, decision))\n>         \n>     conn.commit()\n>     print(\"模擬歷史資料寫入 SQL 完成。\")\n> \n> def random_uniform(low, high):\n>     return low + (high - low) * np.random.rand()\n> \n> # =====================================================================\n> # 3. 從 SQL 載入資料並訓練機器學習模型 (Random Forest)\n> # =====================================================================\n> \n> def train_rf_from_sql(conn):\n>     print(\"\\n--- 步驟 A: 自 SQL 載入特徵資料並訓練隨機森林分類器 ---\")\n>     \n>     # 使用 Pandas 直接下 SQL 語句讀取資料集\n>     sql_query = \"SELECT do_val, temp_val, ph_val, decision FROM sensor_logs\"\n>     df = pd.read_sql_query(sql_query, conn)\n>     \n>     print(f\"從 SQL 讀取到數據，形狀為: {df.shape}\")\n>     print(\"數據前 5 筆樣貌:\")\n>     print(df.head())\n>     \n>     # 提取特徵與標籤\n>     X = df[['do_val', 'temp_val', 'ph_val']].values\n>     y = df['decision'].values\n>     \n>     # 訓練隨機森林模型\n>     rf = RandomForestClassifier(n_estimators=50, max_depth=4, random_state=42)\n>     rf.fit(X, y)\n>     print(\"✓ 隨機森林模型基於 SQL 資料庫歷史日誌訓練完成！\")\n>     return rf\n> \n> # =====================================================================\n> # 4. 從 SQL 載入時間序列數據並進行 ARIMA 預測\n> # =====================================================================\n> \n> def run_arima_from_sql(conn):\n>     print(\"\\n--- 步驟 B: 自 SQL 載入時間序列資料進行 ARIMA 預估 ---\")\n>     \n>     # 撈取最近 24 筆以小時為單位的溶氧量監測數據 (按時間升序)\n>     # 為了展示，這裡直接使用 SQL 的分群平均 (Group by) 或直接 LIMIT\n>     sql_query = \"\"\"\n>     SELECT timestamp, do_val \n>     FROM sensor_logs \n>     ORDER BY timestamp DESC \n>     LIMIT 24\n>     \"\"\"\n>     df_ts = pd.read_sql_query(sql_query, conn)\n>     \n>     # 轉回升序排列以利時間序列訓練\n>     df_ts = df_ts.iloc[::-1].reset_index(drop=True)\n>     df_ts['timestamp'] = pd.to_datetime(df_ts['timestamp'])\n>     df_ts.set_index('timestamp', inplace=True)\n>     \n>     print(\"自 SQL 讀取到的最近 24 小時歷史時間序列數據：\")\n>     print(df_ts.tail(5))\n>     \n>     # 擬合 ARIMA 模型 (p=1, d=1, q=1)\n>     # 取出單維度 Series\n>     series = df_ts['do_val']\n>     model = ARIMA(series, order=(1, 1, 1))\n>     result = model.fit()\n>     \n>     # 預測接下來 3 個時間點 (後續 1小時, 2小時, 3小時)\n>     forecast = result.forecast(steps=3)\n>     \n>     print(\"\\nARIMA 預估未來 3 個時間點溶氧量:\")\n>     for i, val in enumerate(forecast):\n>         print(f\"  - 未來第 {i+1} 步預測: {val:.2f} mg/L\")\n>         \n>     danger_limit = 3.0\n>     if any(val < danger_threshold for val in forecast):\n>         print(\"\\033[1;31m🚨 [SQL 時間序列預警] 警告：預測溶氧即將跌破 3.0 mg/L！觸發防禦控制開啟水車。\\033[0m\")\n>     else:\n>         print(\"✅ 預估狀態安全。\")\n> \n> danger_threshold = 3.0\n> \n> # =====================================================================\n> # 主執行流程\n> # =====================================================================\n> \n> if __name__ == \"__main__\":\n>     db_file = \"rag_database.db\"\n>     \n>     # 連線資料庫並初始化表\n>     db_conn = init_sensor_db(db_file)\n>     \n>     # 模擬數據注入\n>     insert_mock_data_to_sql(db_conn, num_records=200)\n>     \n>     # 執行 SQL 訓練隨機森林\n>     rf_model = train_rf_from_sql(db_conn)\n>     \n>     # 執行 SQL ARIMA 預估\n>     run_arima_from_sql(db_conn)\n>     \n>     db_conn.close()\n",
+    "id": 28
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "五、 水質溶氧量之 ARIMA 時間序列預測實務",
+    "content": "aquaculture_time_series.py 專注於養殖水質的時間序列預測。透過引入 statsmodels 庫中的 ARIMA 模型（差分整合移動平均自迴歸模型），程式能對歷史溶氧量數據進行建模與擬合，進而預測未來數小時內水體溶氧的變化趨勢。這在水產現場極具實戰價值，能讓養殖戶在溶氧降至危險值前 2 小時提前啟動打氣設備。\n\n【現場防範應變案例】ARIMA (p, d, q) 參數自動定階後，預測 2 小時後池塘溶氧將由 5.2 mg/L 急遽跌落至 2.8 mg/L。中央控制系統收到此預測報告後，會提前 1.5 小時開啟打氣機增氧，成功避免魚群集體浮頭死亡。\n\n【完整原始碼清單】aquaculture_time_series.py",
+    "id": 29
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "五、 水質溶氧量之 ARIMA 時間序列預測實務",
+    "content": "> import numpy as np\n> import pandas as pd\n> import warnings\n> warnings.filterwarnings(\"ignore\")\n> \n> # 引入 statsmodels 時間序列庫\n> try:\n>     from statsmodels.tsa.arima.model import ARIMA\n>     from statsmodels.tsa.holtwinters import ExponentialSmoothing\n> except ImportError:\n>     print(\"Error: 缺少 statsmodels 庫，請先執行: pip install statsmodels\")\n>     sys.exit(1)\n> \n> # =====================================================================\n> # 1. 建立 24 小時池塘溶氧量監測數據 (Daytime to Early Morning)\n> # 數據特徵：下午光合作用強烈溶氧達最高點，日落後由於呼吸作用，溶氧持續衰退至清晨\n> # =====================================================================\n> \n> # 建立 24 小時時間戳記\n> time_index = pd.date_range(\"2026-06-09 12:00:00\", periods=24, freq=\"h\")\n> \n> # 24 小時的溶氧量變化 (mg/L)\n> do_data = [\n>     7.2, 7.8, 8.4, 8.9, 8.6, 8.1, 7.5, 6.9, 6.3, 5.8, 5.3, 4.9, # 12:00 - 23:00\n>     4.5, 4.1, 3.8, 3.5, 3.2, 2.9, 2.7, 2.5, 2.3, 2.2, 2.1, 2.0  # 00:00 - 11:00 (次日)\n> ]\n> \n> # 封裝成 Pandas Series\n> ts_do = pd.Series(do_data, index=time_index)\n> \n> # 將前 18 個小時作為訓練數據 (12:00 - 次日 05:00)\n> # 預測接下來的 6 個小時 (次日 06:00 - 11:00)，這段期間是清晨溶氧最低的危急時刻\n> train_data = ts_do.iloc[:18]\n> test_data = ts_do.iloc[18:]\n> \n> print(\"=== 歷史監測數據 (最後 6 筆訓練集) ===\")\n> print(train_data.tail(6))\n> print(\"-\" * 50)\n> \n> # =====================================================================\n> # 2. 實作 ARIMA(1, 1, 1) 模型\n> # ARIMA 三個參數說明：\n> #   p=1 (自回歸項 AR)：利用前一個小時的數值來預測當前值。\n> #   d=1 (差分次數 I)：將序列差分 1 次以消除趨勢，使資料平穩（消除夜間持續衰退的趨勢）。\n> #   q=1 (移動平均項 MA)：利用前一個小時的預測誤差來修正當前預測。\n> # =====================================================================\n> \n> print(\"\\n[模型一：ARIMA(1, 1, 1) 自回歸整合移動平均模型]\")\n> # 建立並擬合模型\n> arima_model = ARIMA(train_data, order=(1, 1, 1))\n> arima_result = arima_model.fit()\n> \n> # 預測未來 6 步 (6 小時)，並獲取預測結果與信賴區間\n> arima_forecast = arima_result.get_forecast(steps=6)\n> arima_means = arima_forecast.predicted_mean\n> arima_ci = arima_forecast.conf_int(alpha=0.05)  # 95% 信賴區間\n> \n> print(\"ARIMA 預測結果：\")\n> for i in range(6):\n>     dt = test_data.index[i].strftime(\"%H:%M\")\n>     pred_val = arima_means.iloc[i]\n>     actual_val = test_data.iloc[i]\n>     low_ci = arima_ci.iloc[i, 0]\n>     high_ci = arima_ci.iloc[i, 1]\n>     print(f\"  - 時間: {dt} | 預測溶氧: {pred_val:.2f} mg/L (95% CI: {low_ci:.2f} ~ {high_ci:.2f}) | 實際值: {actual_val:.2f} mg/L\")\n> \n> # =====================================================================\n> # 3. 實作雙參數指數平滑模型 (Holt's Linear Exponential Smoothing)\n> # 參數說明：\n> #   trend='add'：加法趨勢。表示假設溶氧量隨時間呈線性下降趨勢。\n> #   seasonal=None：此處監測短期衰退，無須引入季節性週期。\n> # =====================================================================\n> \n> print(\"\\n[模型二：Holt 雙參數指數平滑模型 (Double Exponential Smoothing)]\")\n> # 建立並擬合模型\n> holt_model = ExponentialSmoothing(train_data, trend='add', seasonal=None)\n> holt_result = holt_model.fit()\n> \n> # 預測未來 6 小時\n> holt_forecast = holt_result.forecast(steps=6)\n> \n> print(\"Holt 指數平滑預測結果：\")\n> for i in range(6):\n>     dt = test_data.index[i].strftime(\"%H:%M\")\n>     pred_val = holt_forecast.iloc[i]\n>     actual_val = test_data.iloc[i]\n>     print(f\"  - 時間: {dt} | 預測溶氧: {pred_val:.2f} mg/L | 實際值: {actual_val:.2f} mg/L\")\n> \n> # =====================================================================\n> # 4. 決策預警邏輯集成\n> # =====================================================================\n> \n> print(\"\\n[智慧預警決策判定]\")\n> danger_threshold = 3.0  # 溶氧低於 3.0 mg/L 判定為危急狀態，魚隻易窒息\n> alert_triggered = False\n> alert_time = None\n> alert_val = 0.0\n> \n> # 檢查 ARIMA 預測是否會在未來 6 小時內跌破警戒線\n> for i in range(6):\n>     pred_val = arima_means.iloc[i]\n>     if pred_val < danger_threshold:\n>         alert_triggered = True\n>         alert_time = test_data.index[i].strftime(\"%H:%M\")\n>         alert_val = pred_val\n>         break\n> \n> if alert_triggered:\n>     print(f\"\\033[1;31m🚨 [水質警戒警告] ARIMA 模型預測在 {alert_time} 溶氧將跌至 {alert_val:.2f} mg/L，低於安全警戒值 (3.00 mg/L)！\\033[0m\")\n>     print(\"\\033[1;32m💡 決策指令：向本地端 ESP32 發送中控信號，提前開啟水車與打氣設備，防止溶氧崩解。\\033[0m\")\n> else:\n>     print(\"✅ 預估未來 6 小時內溶氧指標安全。\")\n",
+    "id": 30
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "三、 FastAPI 異步後端 Web API 與串流生成核心",
+    "content": "app.py 是 AquaRAG 系統的後端核心服務。基於 FastAPI 異步 Web 框架開發，它實現了四大功能：第一，透過 /api/search 提供雙路語意檢索 API；第二，透過 /api/chat 提供結合檢索上下文的 LLM 問答 API，並支援 SSE（Server-Sent Events）流式文本輸出，提升終端用戶體驗；第三，提供了與 SQLite 數據交互的底層接口；第四，靜態資源掛載，用於展示前端 UI 介面。這是一個典型的 Production-ready 輕量級 AI 服務後端。\n\n【API 串接範例】前端向 /api/chat 發送 POST 請求，帶有用戶提問。FastAPI 端異步啟動 SQLite 檢索，建構 RAG Context 填入 Prompt，再以 EventSource 串流形式逐步吐出 Qwen2.5 的回答，實現零延遲的前端打字機效果。\n\n【完整原始碼清單】app.py",
+    "id": 31
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "三、 FastAPI 異步後端 Web API 與串流生成核心",
+    "content": "> import os\n> import sqlite3\n> import json\n> import requests\n> import uvicorn\n> from fastapi import FastAPI, HTTPException, Request\n> from fastapi.responses import StreamingResponse, HTMLResponse\n> from fastapi.staticfiles import StaticFiles\n> from fastapi.middleware.cors import CORSMiddleware\n> from pydantic import BaseModel\n> from typing import List, Dict, Any\n> \n> from search_engine import SearchEngine\n> \n> app = FastAPI(title=\"魚類生理學歷屆試題 RAG 系統\")\n> \n> # Enable CORS\n> app.add_middleware(\n>     CORSMiddleware,\n>     allow_origins=[\"*\"],\n>     allow_credentials=True,\n>     allow_methods=[\"*\"],\n>     allow_headers=[\"*\"],\n> )\n> \n> # Initialize Search Engine\n> search_engine = SearchEngine(db_path=\"rag_database.db\", embed_model=\"nomic-embed-text\")\n> \n> class ChatMessage(BaseModel):\n>     role: str\n>     content: str\n> \n> class ChatRequest(BaseModel):\n>     message: str\n>     history: List[ChatMessage]\n> \n> @app.get(\"/api/stats\")\n> def get_stats():\n>     db_path = \"rag_database.db\"\n>     if not os.path.exists(db_path):\n>         return {\n>             \"exam_sets_count\": 0,\n>             \"questions_count\": 0,\n>             \"db_size_mb\": 0\n>         }\n>     \n>     conn = sqlite3.connect(db_path)\n>     cursor = conn.cursor()\n>     \n>     cursor.execute(\"SELECT COUNT(DISTINCT exam_set) FROM questions\")\n>     exam_sets_count = cursor.fetchone()[0]\n>     \n>     cursor.execute(\"SELECT COUNT(*) FROM questions\")\n>     questions_count = cursor.fetchone()[0]\n>     \n>     conn.close()\n>     \n>     db_size_mb = os.path.getsize(db_path) / (1024 * 1024)\n>     \n>     return {\n>         \"exam_sets_count\": exam_sets_count,\n>         \"questions_count\": questions_count,\n>         \"db_size_mb\": round(db_size_mb, 2)\n>     }\n> \n> @app.get(\"/api/exam-sets\")\n> def get_exam_sets():\n>     db_path = \"rag_database.db\"\n>     if not os.path.exists(db_path):\n>         return []\n>         \n>     conn = sqlite3.connect(db_path)\n>     cursor = conn.cursor()\n>     cursor.execute(\"SELECT id, exam_set, question_num, question_title FROM questions ORDER BY id\")\n>     rows = cursor.fetchall()\n>     conn.close()\n>     \n>     # Structure by exam set\n>     sets_dict = {}\n>     for row in rows:\n>         qid, exam_set, q_num, q_title = row\n>         if exam_set not in sets_dict:\n>             sets_dict[exam_set] = []\n>         sets_dict[exam_set].append({\n>             \"id\": qid,\n>             \"question_num\": q_num,\n>             \"question_title\": q_title\n>         })\n>         \n>     result = []\n>     for exam_set, questions in sets_dict.items():\n>         result.append({\n>             \"exam_set\": exam_set,\n>             \"questions\": questions\n>         })\n>         \n>     return result\n> \n> @app.get(\"/api/question/{qid}\")\n> def get_question(qid: int):\n>     db_path = \"rag_database.db\"\n>     if not os.path.exists(db_path):\n>         raise HTTPException(status_code=404, detail=\"Database not initialized\")\n>         \n>     conn = sqlite3.connect(db_path)\n>     cursor = conn.cursor()\n>     cursor.execute(\"SELECT id, exam_set, question_num, question_title, original_question, full_content FROM questions WHERE id = ?\", (qid,))\n>     row = cursor.fetchone()\n>     conn.close()\n>     \n>     if not row:\n>         raise HTTPException(status_code=404, detail=\"Question not found\")\n>         \n>     qid, exam_set, q_num, q_title, orig_q, content = row\n>     return {\n>         \"id\": qid,\n>         \"exam_set\": exam_set,\n>         \"question_num\": q_num,\n>         \"question_title\": q_title,\n>         \"original_question\": orig_q,\n>         \"full_content\": content\n>     }\n> \n> @app.get(\"/api/search\")\n> def search(q: str, top_k: int = 5):\n>     if not q:\n>         return []\n>     results = search_engine.search(q, top_k=top_k)\n>     \n>     formatted_results = []\n>     for r in results:\n>         q_data = r[\"question\"]\n>         formatted_results.append({\n>             \"id\": q_data[\"id\"],\n>             \"exam_set\": q_data[\"exam_set\"],\n>             \"question_num\": q_data[\"question_num\"],\n>             \"question_title\": q_data[\"question_title\"],\n>             \"original_question\": q_data[\"original_question\"],\n>             \"full_content\": q_data[\"full_content\"],\n>             \"score\": r[\"score\"],\n>             \"type\": r[\"type\"]\n>         })\n>     return formatted_results\n> \n> async def sse_chat_generator(message: str, history: List[Dict[str, str]]):\n>     # 1. Retrieve top-4 relevant chunks\n>     results = search_engine.search(message, top_k=4)\n>     \n>     citations = []\n>     context_parts = []\n>     for r in results:\n>         q = r[\"question\"]\n>         citations.append({\n>             \"id\": q[\"id\"],\n>             \"exam_set\": q[\"exam_set\"],\n>             \"question_num\": q[\"question_num\"],\n>             \"question_title\": q[\"question_title\"],\n>             \"score\": r[\"score\"]\n>         })\n>         context_parts.append(\n>             f\"來源：{q['exam_set']} - {q['question_num']}\\n\"\n>             f\"題目：{q['question_title']}\\n\"\n>             f\"專家解答內容：\\n{q['full_content']}\"\n>         )\n>         \n>     # Yield citations as the first event\n>     yield f\"event: citations\\ndata: {json.dumps(citations, ensure_ascii=False)}\\n\\n\"\n>     \n>     # 2. Construct prompt\n>     context_str = \"\\n\\n====================\\n\\n\".join(context_parts)\n>     prompt = (\n>         \"你是一個「魚類生理學」的學術與國家考試輔導專家 AI。請根據以下檢索到的歷屆試題專家解答作為參考，專業且有條理地回答使用者提出的問題。\\n\\n\"\n>         \"【檢索到的相關歷屆試題與專家解答】：\\n\"\n>         \"------------------------------------\\n\"\n>         f\"{context_str}\\n\"\n>         \"------------------------------------\\n\\n\"\n>         \"【使用者提問】：\\n\"\n>         f\"{message}\\n\\n\"\n>         \"【答題指引與要求】：\\n\"\n>         \"1. 請提供專業、學術性強且條理分明的解答。請善用 Markdown 語法（粗體、列表、表格）來呈現。\\n\"\n>         \"2. 如果檢索內容包含生理機制（如滲透壓調節、呼吸作用、循環、內分泌、消化與吸收等）或水產養殖實務案例，請務必深入淺出地融入你的回答中。\\n\"\n>         \"3. 回答必須是繁體中文。\\n\"\n>         \"4. 請不要在回答中重複複製整篇參考解答，而是要進行融合與歸納整理，提供最切合使用者提問的解答。\\n\"\n>         \"請開始答題：\"\n>     )\n>     \n>     # 3. Format history for Ollama chat\n>     ollama_messages = []\n>     for msg in history:\n>         ollama_messages.append({\n>             \"role\": msg[\"role\"],\n>             \"content\": msg[\"content\"]\n>         })\n>     # Add the current prompt\n>     ollama_messages.append({\n>         \"role\": \"user\",\n>         \"content\": prompt\n>     })\n>     \n>     url = \"http://localhost:11434/api/chat\"\n>     payload = {\n>         \"model\": os.getenv(\"OLLAMA_MODEL\", \"qwen2.5\"),\n>         \"messages\": ollama_messages,\n>         \"stream\": True\n>     }\n>     \n>     # 4. Stream response\n>     try:\n>         response = requests.post(url, json=payload, stream=True, timeout=60)\n>         response.raise_for_status()\n>         \n>         for chunk in response.iter_lines():\n>             if chunk:\n>                 chunk_data = json.loads(chunk.decode(\"utf-8\"))\n>                 content = chunk_data.get(\"message\", {}).get(\"content\", \"\")\n>                 if content:\n>                     payload_data = {\"text\": content}\n>                     yield f\"event: text\\ndata: {json.dumps(payload_data, ensure_ascii=False)}\\n\\n\"\n>                     \n>         yield \"event: done\\ndata: {}\\n\\n\"\n>         \n>     except Exception as e:\n>         err_data = {\"error\": str(e)}\n>         yield f\"event: error\\ndata: {json.dumps(err_data, ensure_ascii=False)}\\n\\n\"\n> \n> @app.post(\"/api/chat\")\n> async def chat(request: ChatRequest):\n>     history_dicts = [{\"role\": msg.role, \"content\": msg.content} for msg in request.history]\n>     return StreamingResponse(\n>         sse_chat_generator(request.message, history_dicts),\n>         media_type=\"text/event-stream\"\n>     )\n> \n> # Serve static files\n> # Create static directory if not exists\n> os.makedirs(\"static\", exist_ok=True)\n> \n> @app.get(\"/\", response_class=HTMLResponse)\n> async def get_index():\n>     index_path = \"static/index.html\"\n>     if os.path.exists(index_path):\n>         with open(index_path, \"r\", encoding=\"utf-8\") as f:\n>             return HTMLResponse(content=f.read())\n>     else:\n>         return HTMLResponse(content=\"<h1>RAG Static UI is loading...</h1>\")\n> \n> app.mount(\"/static\", StaticFiles(directory=\"static\"), name=\"static\")\n> \n> if __name__ == \"__main__\":\n>     uvicorn.run(\"app:app\", host=\"0.0.0.0\", port=8000, reload=True)\n",
+    "id": 32
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "五、 本地機器學習模型定期排程運行腳本",
+    "content": "run_advanced_models.sh 用於自動化調度與運行這些機器學習與時間序列預測模型。它會定期從 SQLite 資料庫中抽取最新數據，調用 sql_model_pipeline.py 訓練與預測，並將結果輸出為 JSON 報告，供 FastAPI 後端或 ESP32 進行數據訂閱與反饋控制。\n\n【排程控制實例】利用 cron 排程，每 10 分鐘調用一次 ./run_advanced_models.sh。當發現 ARIMA 預測有水質逆境風險時，立即向管理員的 LINE Bot 發送警告訊息。\n\n【完整原始碼清單】run_advanced_models.sh",
+    "id": 33
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "五、 本地機器學習模型定期排程運行腳本",
+    "content": "> #!/bin/bash\n> \n> # Define Colors\n> GREEN='\\033[0;32m'\n> BOLD_GREEN='\\033[1;32m'\n> YELLOW='\\033[0;33m'\n> BOLD_YELLOW='\\033[1;33m'\n> RED='\\033[0;31m'\n> BOLD_RED='\\033[1;31m'\n> CYAN='\\033[0;36m'\n> BOLD_CYAN='\\033[1;36m'\n> RESET='\\033[0m'\n> \n> # Print Header\n> echo -e \"${BOLD_CYAN}====================================================${RESET}\"\n> echo -e \"${BOLD_CYAN}       AquaRAG 進階輕量機器學習模型執行器             ${RESET}\"\n> echo -e \"${BOLD_CYAN}====================================================${RESET}\"\n> \n> # Get the script directory\n> SCRIPT_DIR=\"$( cd \"$( dirname \"${BASH_SOURCE[0]}\" )\" &> /dev/null && pwd )\"\n> cd \"$SCRIPT_DIR\"\n> \n> # 1. 檢查與安裝必要的 Python 庫 (如 pandas 與 scikit-learn)\n> echo -e \"\\n${BOLD_CYAN}[1/2] 正在檢查模型依賴庫...${RESET}\"\n> REQUIRED_PACKAGES=(pandas scikit-learn numpy statsmodels)\n> MISSING_PACKAGES=()\n> \n> for pkg in \"${REQUIRED_PACKAGES[@]}\"; do\n>     python3 -c \"import $pkg\" &>/dev/null\n>     if [ $? -ne 0 ]; then\n>         MISSING_PACKAGES+=(\"$pkg\")\n>     fi\n> done\n> \n> if [ ${#MISSING_PACKAGES[@]} -ne 0 ]; then\n>     echo -e \"${YELLOW}偵測到缺少機器學習套件: ${MISSING_PACKAGES[*]}${RESET}\"\n>     echo -e \"正在嘗試安裝: python3 -m pip install ${MISSING_PACKAGES[*]} ...\"\n>     python3 -m pip install \"${MISSING_PACKAGES[@]}\"\n>     if [ $? -ne 0 ]; then\n>         echo -e \"${BOLD_RED}錯誤: 套件安裝失敗！請手動執行: python3 -m pip install ${REQUIRED_PACKAGES[*]}${RESET}\"\n>         exit 1\n>     fi\n>     echo -e \"${GREEN}✓ 套件安裝完成。${RESET}\"\n> else\n>     echo -e \"${GREEN}✓ 所有機器學習依賴套件已就緒。${RESET}\"\n> fi\n> \n> # 2. 執行模型演示\n> echo -e \"\\n${BOLD_CYAN}[2/2] 正在運行輕量級模型預估與測試...${RESET}\"\n> echo -e \"執行指令: python3 aquaculture_advanced_models.py\"\n> echo -e \"----------------------------------------------------\"\n> python3 aquaculture_advanced_models.py\n> RUN_RES=$?\n> echo -e \"----------------------------------------------------\"\n> \n> if [ $RUN_RES -ne 0 ]; then\n>     echo -e \"${BOLD_RED}錯誤: aquaculture_advanced_models.py 執行失敗！${RESET}\"\n>     exit 1\n> fi\n> \n> echo -e \"\\n執行指令: python3 aquaculture_time_series.py\"\n> echo -e \"----------------------------------------------------\"\n> python3 aquaculture_time_series.py\n> RUN_RES_TS=$?\n> echo -e \"----------------------------------------------------\"\n> \n> if [ $RUN_RES_TS -ne 0 ]; then\n>     echo -e \"${BOLD_RED}錯誤: aquaculture_time_series.py 執行失敗！${RESET}\"\n>     exit 1\n> fi\n> \n> echo -e \"\\n執行指令: python3 sql_model_pipeline.py\"\n> echo -e \"----------------------------------------------------\"\n> python3 sql_model_pipeline.py\n> RUN_RES_SQL=$?\n> echo -e \"----------------------------------------------------\"\n> \n> if [ $RUN_RES_SQL -ne 0 ]; then\n>     echo -e \"${BOLD_RED}錯誤: sql_model_pipeline.py 執行失敗！${RESET}\"\n>     exit 1\n> fi\n> \n> echo -e \"\\n${BOLD_GREEN}====================================================${RESET}\"\n> echo -e \"${BOLD_GREEN} 🎉 所有輕量級、時間序列與 SQL 資料庫模型執行成功！${RESET}\"\n> echo -e \"====================================================\"\n",
+    "id": 34
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "三、 模型量化與壓縮一鍵式控制腳本",
+    "content": "compress_model.sh 提供了模型量化與壓縮的一鍵式方案。在大規模部署時，原始的 FP16 模型往往需要極高的顯存與推論時間。此腳本藉由 Llama.cpp 或 Hugging Face Optimum 工具，將微調後的模型轉換為 GGUF 格式，並進行 4-bit（Q4_K_M）或 8-bit（Q8_0）量化。這使模型能在邊緣運算設備或一般辦公室電腦上流暢運行，顯著降低硬體部署成本。\n\n【壓縮前後性能對比】Qwen-2.5-7B 經此腳本壓縮為 INT4 量化後，模型大小由 15GB 縮小至 4.3GB，而推論速度（Tokens per Second）在一般筆記型電腦 CPU 上提高了 3.5 倍，準確度僅損失不到 1%。\n\n【完整原始碼清單】compress_model.sh",
+    "id": 35
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "三、 模型量化與壓縮一鍵式控制腳本",
+    "content": "> #!/bin/bash\n> \n> # Define Colors\n> GREEN='\\033[0;32m'\n> BOLD_GREEN='\\033[1;32m'\n> YELLOW='\\033[0;33m'\n> BOLD_YELLOW='\\033[1;33m'\n> RED='\\033[0;31m'\n> BOLD_RED='\\033[1;31m'\n> CYAN='\\033[0;36m'\n> BOLD_CYAN='\\033[1;36m'\n> RESET='\\033[0m'\n> \n> # Print Header\n> echo -e \"${BOLD_CYAN}====================================================${RESET}\"\n> echo -e \"${BOLD_CYAN}         Qwen-2.5 模型壓縮與切換管理工具            ${RESET}\"\n> echo -e \"${BOLD_CYAN}====================================================${RESET}\"\n> \n> # Get the script directory\n> SCRIPT_DIR=\"$( cd \"$( dirname \"${BASH_SOURCE[0]}\" )\" &> /dev/null && pwd )\"\n> cd \"$SCRIPT_DIR\"\n> \n> # Show Options\n> echo -e \"請選擇您要切換的模型壓縮等級（數字越小，模型越小，生成速度越快）：\"\n> echo -e \"  [1] ${BOLD_GREEN}無額外壓縮${RESET} (標準 7B, 4-bit 量化, 約 4.7GB) -> qwen2.5\"\n> echo -e \"  [2] ${BOLD_GREEN}輕量化壓縮${RESET} (精簡 3B, 4-bit 量化, 約 1.9GB) -> qwen2.5:3b\"\n> echo -e \"  [3] ${BOLD_GREEN}高度化壓縮${RESET} (極輕 1.5B, 4-bit 量化, 約 986MB) -> qwen2.5:1.5b\"\n> echo -e \"  [4] ${BOLD_GREEN}極限速度壓縮${RESET} (微型 0.5B, 4-bit 量化, 約 397MB) -> qwen2.5:0.5b\"\n> echo -e \"  [5] ${BOLD_YELLOW}深度量化壓縮${RESET} (標準 7B 進行 2-bit 深度壓縮, 約 2.5GB) -> qwen2.5:7b-instruct-q2_K\"\n> echo -e \"  [6] 取消並退出\"\n> \n> read -p \"請輸入選擇 [1-6]: \" OPTION\n> \n> case $OPTION in\n>     1)\n>         MODEL_NAME=\"qwen2.5\"\n>         DESCRIPTION=\"標準 7B 模型 (4-bit 量化)\"\n>         ;;\n>     2)\n>         MODEL_NAME=\"qwen2.5:3b\"\n>         DESCRIPTION=\"輕量 3B 模型 (4-bit 量化)\"\n>         ;;\n>     3)\n>         MODEL_NAME=\"qwen2.5:1.5b\"\n>         DESCRIPTION=\"極輕 1.5B 模型 (4-bit 量化)\"\n>         ;;\n>     4)\n>         MODEL_NAME=\"qwen2.5:0.5b\"\n>         DESCRIPTION=\"微型 0.5B 模型 (4-bit 量化)\"\n>         ;;\n>     5)\n>         MODEL_NAME=\"qwen2.5:7b-instruct-q2_K\"\n>         DESCRIPTION=\"7B 模型 (2-bit 深度量化壓縮)\"\n>         ;;\n>     *)\n>         echo -e \"${YELLOW}已取消操作。${RESET}\"\n>         exit 0\n>         ;;\n> esac\n> \n> echo -e \"\\n${BOLD_CYAN}您選擇了: $DESCRIPTION ($MODEL_NAME)${RESET}\"\n> \n> # 1. 確認 Ollama 狀態\n> echo -e \"確認 Ollama 服務狀態...\"\n> OLLAMA_STATUS=$(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:11434 2>/dev/null || echo \"000\")\n> if [ \"$OLLAMA_STATUS\" = \"000\" ]; then\n>     echo -e \"${BOLD_RED}錯誤: Ollama 服務未啟動！請先開啟 Ollama。${RESET}\"\n>     exit 1\n> fi\n> \n> # 2. 自動拉取模型\n> echo -e \"檢查本地是否存在模型 $MODEL_NAME，若無將自動下載...\"\n> ollama pull $MODEL_NAME\n> \n> # 3. 寫入環境設定檔\n> echo -e \"\\n正在寫入環境設定至 .env 檔案...\"\n> echo \"OLLAMA_MODEL=$MODEL_NAME\" > .env\n> echo -e \"${GREEN}✓ 設定已儲存 (OLLAMA_MODEL=$MODEL_NAME)。${RESET}\"\n> \n> # 4. 自動調用重啟腳本\n> echo -e \"\\n${BOLD_YELLOW}正在調用重啟腳本以載入新模型...${RESET}\"\n> if [ -f \"./restart.sh\" ]; then\n>     ./restart.sh\n> else\n>     echo -e \"${YELLOW}找不到 restart.sh，請手動重啟 FastAPI 服務並設定環境變數 OLLAMA_MODEL=$MODEL_NAME。${RESET}\"\n> fi\n",
+    "id": 36
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "五、 自動化服務健康檢測與重啟維護腳本",
+    "content": "restart.sh 是 AquaRAG 系統的一鍵重啟維護腳本。它能自動檢測背景是否有殘留的 FastAPI 或 Ollama 進程，進行安全釋放後，重新啟動 Ollama 服務並加載指定模型，最後在背景啟動 FastAPI 後端並將日誌重定向至 app.log，隨後啟動健康檢查循環確認 API 響應正常。\n\n【系統重啟實例】當 app.log 出現大量 SQLite Database Locked 或 CUDA OOM 錯誤時，運維守護進程（Daemon）會自動觸發 ./restart.sh，在 15 秒內完成重啟並回復服務。\n\n【完整原始碼清單】restart.sh",
+    "id": 37
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "五、 自動化服務健康檢測與重啟維護腳本",
+    "content": "> #!/bin/bash\n> \n> # Define Colors\n> GREEN='\\033[0;32m'\n> BOLD_GREEN='\\033[1;32m'\n> YELLOW='\\033[0;33m'\n> BOLD_YELLOW='\\033[1;33m'\n> RED='\\033[0;31m'\n> BOLD_RED='\\033[1;31m'\n> CYAN='\\033[0;36m'\n> BOLD_CYAN='\\033[1;36m'\n> RESET='\\033[0m'\n> \n> # Print Header\n> echo -e \"${BOLD_CYAN}====================================================${RESET}\"\n> echo -e \"${BOLD_CYAN}          AquaRAG 系統重新啟動管理工具              ${RESET}\"\n> echo -e \"${BOLD_CYAN}====================================================${RESET}\"\n> \n> # Get the script directory\n> SCRIPT_DIR=\"$( cd \"$( dirname \"${BASH_SOURCE[0]}\" )\" &> /dev/null && pwd )\"\n> cd \"$SCRIPT_DIR\"\n> \n> # Parse arguments\n> REBUILD_DB=false\n> while [[ \"$#\" -gt 0 ]]; do\n>     case $1 in\n>         -r|--rebuild) REBUILD_DB=true ;;\n>         -h|--help)\n>             echo \"使用方法:\"\n>             echo \"  $0 [選項]\"\n>             echo \"\"\n>             echo \"選項:\"\n>             echo \"  -r, --rebuild    強制重新解析 Word 文件並重建向量資料庫\"\n>             echo \"  -h, --help       顯示此說明訊息\"\n>             exit 0\n>             ;;\n>         *) echo -e \"${BOLD_RED}未知參數: $1${RESET}\"; exit 1 ;;\n>     esac\n>     shift\n> done\n> \n> # 1. 停止現有服務\n> echo -e \"\\n${BOLD_CYAN}[1/5] 正在停止現有的 AquaRAG 服務...${RESET}\"\n> PIDS=$(lsof -t -i :8000)\n> \n> if [ -n \"$PIDS\" ]; then\n>     echo -e \"${YELLOW}偵測到連接埠 8000 已被佔用 (PID: $PIDS)。正在終止程序...${RESET}\"\n>     kill $PIDS 2>/dev/null\n>     sleep 1.5\n>     # Double check and force kill if still running\n>     PIDS_STILL=$(lsof -t -i :8000)\n>     if [ -n \"$PIDS_STILL\" ]; then\n>         echo -e \"${RED}程序仍未關閉，強制終止 (kill -9 $PIDS_STILL)...${RESET}\"\n>         kill -9 $PIDS_STILL 2>/dev/null\n>     fi\n>     echo -e \"${GREEN}成功停止舊服務。${RESET}\"\n> else\n>     echo -e \"${GREEN}沒有偵測到佔用連接埠 8000 的 AquaRAG 服務。${RESET}\"\n> fi\n> \n> # 2. 依賴環境檢查\n> echo -e \"\\n${BOLD_CYAN}[2/5] 正在檢查依賴環境與服務...${RESET}\"\n> \n> # Check python3\n> if ! command -v python3 &> /dev/null; then\n>     echo -e \"${BOLD_RED}錯誤: 系統未安裝 python3。請先安裝 Python 3。${RESET}\"\n>     exit 1\n> fi\n> echo -e \"${GREEN}✓ Python 3 已安裝。${RESET}\"\n> \n> # Check Python libraries\n> echo -e \"檢查 Python 依賴套件...\"\n> MISSING_LIBS=()\n> for lib in fastapi uvicorn requests numpy docx; do\n>     python3 -c \"import $lib\" &> /dev/null\n>     if [ $? -ne 0 ]; then\n>         MISSING_LIBS+=($lib)\n>     fi\n> done\n> \n> if [ ${#MISSING_LIBS[@]} -ne 0 ]; then\n>     echo -e \"${BOLD_RED}錯誤: 缺少以下 Python 套件: ${MISSING_LIBS[*]}${RESET}\"\n>     echo -e \"${YELLOW}請執行指令安裝: pip install ${MISSING_LIBS[*]}${RESET}\"\n>     exit 1\n> fi\n> echo -e \"${GREEN}✓ Python 依賴套件檢查通過。${RESET}\"\n> \n> # Check Ollama status\n> echo -e \"檢查 Ollama 向量與語言模型服務...\"\n> OLLAMA_STATUS=$(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:11434 2>/dev/null || echo \"000\")\n> if [ \"$OLLAMA_STATUS\" = \"000\" ]; then\n>     echo -e \"${BOLD_RED}錯誤: Ollama 服務未啟動！${RESET}\"\n>     echo -e \"${YELLOW}請先開啟 Ollama 應用程式，或在終端機執行: ollama serve${RESET}\"\n>     exit 1\n> fi\n> echo -e \"${GREEN}✓ Ollama 服務正常運作。${RESET}\"\n> \n> # Check Ollama models\n> OLLAMA_MODELS=$(curl -s http://localhost:11434/api/tags | jq -r '.models[].name' 2>/dev/null || ollama list | awk 'NR>1 {print $1}')\n> \n> check_model() {\n>     local target_model=$1\n>     if echo \"$OLLAMA_MODELS\" | grep -q \"$target_model\"; then\n>         return 0\n>     else\n>         return 1\n>     fi\n> }\n> \n> # Ensure nomic-embed-text exists\n> if check_model \"nomic-embed-text\"; then\n>     echo -e \"${GREEN}✓ 向量模型 (nomic-embed-text) 已準備就緒。${RESET}\"\n> else\n>     echo -e \"${YELLOW}找不到向量模型 nomic-embed-text，正在自動下載...${RESET}\"\n>     ollama pull nomic-embed-text\n> fi\n> \n> # Ensure qwen2.5 exists\n> if check_model \"qwen2.5\"; then\n>     echo -e \"${GREEN}✓ 語言模型 (qwen2.5) 已準備就緒。${RESET}\"\n> else\n>     echo -e \"${YELLOW}找不到語言模型 qwen2.5，正在自動下載...${RESET}\"\n>     ollama pull qwen2.5\n> fi\n> \n> # 3. 資料庫驗證與重構\n> echo -e \"\\n${BOLD_CYAN}[3/5] 正在驗證資料庫狀態...${RESET}\"\n> DB_EXISTS=true\n> if [ ! -f \"rag_database.db\" ]; then\n>     echo -e \"${YELLOW}警告: 找不到資料庫檔案 (rag_database.db)。將自動進行初始化建置。${RESET}\"\n>     DB_EXISTS=false\n> fi\n> \n> if [ \"$REBUILD_DB\" = true ] || [ \"$DB_EXISTS\" = false ]; then\n>     echo -e \"${BOLD_YELLOW}正在啟動資料庫建置/重構流程...${RESET}\"\n>     \n>     echo -e \"-> 步驟 1: 解析專家解答 Word 文件...\"\n>     python3 parser.py\n>     if [ $? -ne 0 ]; then\n>         echo -e \"${BOLD_RED}錯誤: parser.py 執行失敗！請檢查 '魚類生理學歷屆試題專家解答.docx' 是否存在。${RESET}\"\n>         exit 1\n>     fi\n>     \n>     echo -e \"-> 步驟 2: 計算文字向量嵌入並載入資料庫...\"\n>     python3 embedder.py\n>     if [ $? -ne 0 ]; then\n>         echo -e \"${BOLD_RED}錯誤: embedder.py 執行失敗！請確認 Ollama 服務與向量模型是否正常運作。${RESET}\"\n>         exit 1\n>     fi\n>     \n>     echo -e \"${BOLD_GREEN}✓ 資料庫建置完成。${RESET}\"\n> else\n>     # Quick integrity check\n>     DB_ROWS=$(python3 -c \"import sqlite3; conn = sqlite3.connect('rag_database.db'); print(conn.execute('SELECT COUNT(*) FROM questions').fetchone()[0])\" 2>/dev/null || echo \"0\")\n>     if [ \"$DB_ROWS\" -eq 0 ]; then\n>         echo -e \"${BOLD_YELLOW}警告: 資料庫為空或已損毀，強制重新建置...${RESET}\"\n>         python3 parser.py && python3 embedder.py\n>     else\n>         echo -e \"${GREEN}✓ 資料庫已就緒，包含 $DB_ROWS 筆試題資料。${RESET}\"\n>     fi\n> fi\n> \n> # 4. 背景啟動 FastAPI\n> echo -e \"\\n${BOLD_CYAN}[4/5] 正在啟動 AquaRAG 後端服務...${RESET}\"\n> if [ -f \".env\" ]; then\n>     echo -e \"載入環境變數設定 (.env)...\"\n>     export $(cat .env | grep -v '^#' | xargs)\n> fi\n> echo -e \"執行模型: ${BOLD_GREEN}${OLLAMA_MODEL:-qwen2.5}${RESET}\"\n> echo -e \"執行指令: nohup python3 app.py > app.log 2>&1 &\"\n> nohup python3 app.py > app.log 2>&1 &\n> APP_PID=$!\n> sleep 1\n> \n> # Check if PID is still alive\n> if kill -0 $APP_PID 2>/dev/null; then\n>     echo -e \"${GREEN}服務已在背景啟動 (PID: $APP_PID)，日誌輸出至 app.log。${RESET}\"\n> else\n>     echo -e \"${BOLD_RED}錯誤: 後端服務啟動後立即結束，請檢查 app.log！${RESET}\"\n>     tail -n 15 app.log\n>     exit 1\n> fi\n> \n> # 5. 健康檢查\n> echo -e \"\\n${BOLD_CYAN}[5/5] 正在進行健康檢查...${RESET}\"\n> echo -n \"等待服務響應.\"\n> SUCCESS=false\n> for i in {1..15}; do\n>     STATUS_CODE=$(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8000/api/stats 2>/dev/null || echo \"000\")\n>     if [ \"$STATUS_CODE\" = \"200\" ]; then\n>         SUCCESS=true\n>         break\n>     fi\n>     echo -n \".\"\n>     sleep 1\n> done\n> echo \"\"\n> \n> if [ \"$SUCCESS\" = true ]; then\n>     echo -e \"\\n${BOLD_GREEN}====================================================${RESET}\"\n>     echo -e \"       🎉 AquaRAG 系統已成功重啟並運行中！\"\n>     echo -e \"====================================================\"\n>     echo -e \"  - 系統網址: ${BOLD_GREEN}http://localhost:8000/${RESET}\"\n>     echo -e \"  - 後端日誌: ${GREEN}tail -f app.log${RESET}\"\n>     echo -e \"====================================================\"\n> else\n>     echo -e \"${BOLD_RED}健康檢查失敗！服務在 15 秒內未回應。${RESET}\"\n>     echo -e \"${YELLOW}請查看日誌內容：${RESET}\"\n>     echo -e \"----------------------------------------------------\"\n>     tail -n 20 app.log\n>     echo -e \"----------------------------------------------------\"\n>     exit 1\n> fi\n",
+    "id": 38
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "六、 安全終止背景服務與釋放資源腳本",
+    "content": "stop.sh 是安全的服務關閉腳本。它讀取運行中的進程 PID，向其發送 SIGTERM 信號進行優雅關閉（Graceful Shutdown），釋放 GPU 顯存與 SQLite 連接鎖定，確保資料庫不會損壞。\n\n【伺服器關機預處理】在主機關機或進行系統升級前，系統會優先運行 ./stop.sh，確保無未提交的資料庫寫入事務，維持資料庫的 ACID 特性。\n\n【完整原始碼清單】stop.sh",
+    "id": 39
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "六、 安全終止背景服務與釋放資源腳本",
+    "content": "> #!/bin/bash\n> \n> # Define Colors\n> GREEN='\\033[0;32m'\n> BOLD_GREEN='\\033[1;32m'\n> YELLOW='\\033[0;33m'\n> BOLD_YELLOW='\\033[1;33m'\n> RED='\\033[0;31m'\n> BOLD_RED='\\033[1;31m'\n> CYAN='\\033[0;36m'\n> BOLD_CYAN='\\033[1;36m'\n> RESET='\\033[0m'\n> \n> # Print Header\n> echo -e \"${BOLD_CYAN}====================================================${RESET}\"\n> echo -e \"${BOLD_CYAN}            AquaRAG 系統停止管理工具                ${RESET}\"\n> echo -e \"${BOLD_CYAN}====================================================${RESET}\"\n> \n> # Get the script directory\n> SCRIPT_DIR=\"$( cd \"$( dirname \"${BASH_SOURCE[0]}\" )\" &> /dev/null && pwd )\"\n> cd \"$SCRIPT_DIR\"\n> \n> # Find PIDs using port 8000\n> PIDS=$(lsof -t -i :8000)\n> \n> if [ -n \"$PIDS\" ]; then\n>     echo -e \"${YELLOW}偵測到 AquaRAG 後端服務正在運行 (PIDs: $PIDS)...${RESET}\"\n>     echo -e \"正在發送終止訊號 (kill)...\"\n>     kill $PIDS 2>/dev/null\n>     \n>     # Wait up to 3 seconds for graceful shutdown\n>     SUCCESS=false\n>     for i in {1..3}; do\n>         PIDS_STILL=$(lsof -t -i :8000)\n>         if [ -z \"$PIDS_STILL\" ]; then\n>             SUCCESS=true\n>             break\n>         fi\n>         sleep 1\n>     done\n>     \n>     if [ \"$SUCCESS\" = false ]; then\n>         PIDS_STILL=$(lsof -t -i :8000)\n>         echo -e \"${BOLD_YELLOW}服務未在時間內響應關閉，執行強制終止 (kill -9 $PIDS_STILL)...${RESET}\"\n>         kill -9 $PIDS_STILL 2>/dev/null\n>         sleep 1\n>     fi\n>     \n>     # Final check\n>     PIDS_FINAL=$(lsof -t -i :8000)\n>     if [ -z \"$PIDS_FINAL\" ]; then\n>         echo -e \"\\n${BOLD_GREEN}====================================================${RESET}\"\n>         echo -e \"${BOLD_GREEN}       🎉 AquaRAG 後端服務已成功停止關閉！${RESET}\"\n>         echo -e \"====================================================\"\n>     else\n>         echo -e \"${BOLD_RED}錯誤: 無法終止程序 (PIDs: $PIDS_FINAL)，請手動檢查！${RESET}\"\n>         exit 1\n>     fi\n> else\n>     echo -e \"${GREEN}沒有偵測到佔用連接埠 8000 的 AquaRAG 服務，服務目前未運行。${RESET}\"\n> fi\n",
+    "id": 40
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "四、 ESP32 智慧物聯網控制器韌體設計（Arduino）",
+    "content": "esp32_controller.ino 適用於 Arduino/ESP32 邊緣端晶片。它透過 ADC 讀取模擬感測器的電壓值（如 pH 計、溶氧感測器、水溫探頭），並利用內部硬編碼的決定樹決策邊界（Decision Boundary）進行即時推理，直接驅動多路繼電器（控制打氣機或水車）。同時，透過 Wi-Fi 模組將水質與繼電器狀態異步上傳至 AquaRAG FastAPI 後端。\n\n【感測器數值採樣】ESP32 每 5 秒對 GPIO34（溶氧）與 GPIO35（pH）進行 100 次採樣並求平均，以濾除高頻雜訊，隨後調用內嵌的決定樹規則判定是否開啟繼電器。\n\n【完整原始碼清單】esp32_controller.ino",
+    "id": 41
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "四、 ESP32 智慧物聯網控制器韌體設計（Arduino）",
+    "content": "> /*\n>  * ESP32 智慧養殖設備控制器\n>  * 自動讀取感測器，執行本地端平衡決定樹模型控制繼電器，並上傳數據\n>  */\n> \n> #include <WiFi.h>\n> #include <HTTPClient.h>\n> \n> // Wi-Fi 設定\n> const char* ssid = \"YOUR_WIFI_SSID\";\n> const char* password = \"YOUR_WIFI_PASSWORD\";\n> \n> // FastAPI 伺服器網址\n> const char* serverName = \"http://localhost:8000/api/sensor-data\";\n> \n> // 繼電器 GPIO 引腳定義\n> #define RELAY_PADDLE_WHEEL 18  // 水車繼電器引腳\n> #define RELAY_AERATOR_PUMP 19  // 打氣機繼電器引腳\n> \n> // 類比感測器引腳模擬\n> #define PIN_DO_SENSOR 34\n> #define PIN_TEMP_SENSOR 35\n> #define PIN_PH_SENSOR 36\n> \n> void setup() {\n>   Serial.begin(115200);\n>   \n>   // 設定繼電器引腳為輸出\n>   pinMode(RELAY_PADDLE_WHEEL, OUTPUT);\n>   pinMode(RELAY_AERATOR_PUMP, OUTPUT);\n>   \n>   // 預設關閉設備 (低電平觸發或高電平觸發依硬體決定)\n>   digitalWrite(RELAY_PADDLE_WHEEL, LOW);\n>   digitalWrite(RELAY_AERATOR_PUMP, LOW);\n>   \n>   // 連線 Wi-Fi\n>   WiFi.begin(ssid, password);\n>   Serial.print(\"Connecting to Wi-Fi\");\n>   while (WiFi.status() != WL_CONNECTED) {\n>     delay(500);\n>     Serial.print(\".\");\n>   }\n>   Serial.println(\"\\nConnected to Wi-Fi successfully!\");\n> }\n> \n> // 本地平衡決定樹預測演算法 (自動生成)\n> int predictAction(float do_val, float temp_val, float ph_val) {\n>   if (do_val < 4.81) {\n>     if (do_val < 3.27) {\n>       return 2; // 2\n>     } else {\n>       return 1; // 1\n>     }\n>   } else {\n>     if (do_val < 5.19) {\n>       if (temp_val < 30.31) {\n>         return 0; // 0\n>       } else {\n>         return 1; // 1\n>       }\n>     } else {\n>       return 0; // 0\n>     }\n>   }\n> }\n> \n> void executeAction(int action) {\n>   if (action == 0) {\n>     // 正常：關閉水車與打氣機\n>     digitalWrite(RELAY_PADDLE_WHEEL, LOW);\n>     digitalWrite(RELAY_AERATOR_PUMP, LOW);\n>     Serial.println(\"設備狀態: 全部關閉 (正常)\");\n>   } else if (action == 1) {\n>     // 警告：開啟打氣機，關閉水車\n>     digitalWrite(RELAY_PADDLE_WHEEL, LOW);\n>     digitalWrite(RELAY_AERATOR_PUMP, HIGH);\n>     Serial.println(\"設備狀態: 開啟打氣設備 (警告)\");\n>   } else if (action == 2) {\n>     // 危急：水車與打氣機全部開啟\n>     digitalWrite(RELAY_PADDLE_WHEEL, HIGH);\n>     digitalWrite(RELAY_AERATOR_PUMP, HIGH);\n>     Serial.println(\"設備狀態: 水車與打氣機全開 (危急)\");\n>   }\n> }\n> \n> void loop() {\n>   // 1. 讀取感測器數值 (此處以類比讀取並映射做為範例)\n>   float do_val = (analogRead(PIN_DO_SENSOR) / 4095.0) * 10.0;     // 模擬溶氧量 0-10 mg/L\n>   float temp_val = 15.0 + (analogRead(PIN_TEMP_SENSOR) / 4095.0) * 25.0; // 模擬溫度 15-40 度\n>   float ph_val = 5.0 + (analogRead(PIN_PH_SENSOR) / 4095.0) * 5.0;       // 模擬 pH 5-10\n>   \n>   Serial.printf(\"讀取數據 - 溶氧量: %.2f mg/L | 溫度: %.2f C | pH: %.2f\\n\", do_val, temp_val, ph_val);\n>   \n>   // 2. 執行本地端樹狀決策模型\n>   int decision = predictAction(do_val, temp_val, ph_val);\n>   \n>   // 3. 執行硬體控制\n>   executeAction(decision);\n>   \n>   // 4. 上傳數據到 FastAPI 伺服器\n>   if (WiFi.status() == WL_CONNECTED) {\n>     HTTPClient http;\n>     http.begin(serverName);\n>     http.addHeader(\"Content-Type\", \"application/json\");\n>     \n>     String httpRequestData = \"{\\\"do_val\\\":\" + String(do_val, 2) + \n>                              \",\\\"temp_val\\\":\" + String(temp_val, 2) + \n>                              \",\\\"ph_val\\\":\" + String(ph_val, 2) + \n>                              \",\\\"decision\\\":\" + String(decision) + \"}\";\n>                              \n>     int httpResponseCode = http.POST(httpRequestData);\n>     Serial.print(\"HTTP POST 回傳碼: \");\n>     Serial.println(httpResponseCode);\n>     http.end();\n>   }\n>   \n>   delay(5000); // 每 5 秒循環一次\n> }\n",
+    "id": 42
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "五、 平衡決定樹訓練與代碼編譯器設計",
+    "content": "build_decision_model.py 則是平衡決定樹模型的訓練與規則生成器。它基於 Gini 不純度（Gini Impurity）在 Python 中手工實現了 CART 決定樹算法，能限制最大深度以實現平衡性控制。最獨特的是，它在訓練完成後能自動將決定樹結構編譯成 Python 原始碼（aquaculture_rules.py）與 C++ 原始碼，直接供 ESP32 控制器燒錄使用，實現了「雲端/本機訓練，邊緣部署」的物聯網閉環。\n\n【決策樹生成規則實例】執行 python3 build_decision_model.py 後，自動在控制臺印出 Gini 節點分裂路徑，並寫入 C++ 與 Python 代碼，保證兩端決策邏輯的 100% 一致性。\n\n【完整原始碼清單】build_decision_model.py",
+    "id": 43
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "五、 平衡決定樹訓練與代碼編譯器設計",
+    "content": "> import os\n> import random\n> import numpy as np\n> \n> # Define Features: 0: DO (mg/L), 1: Temp (°C), 2: pH\n> # Define Actions: \n> #   0: 正常運作 (水車與打氣均關閉)\n> #   1: 啟動打氣設備 (DO偏低或高溫)\n> #   2: 啟動水車與打氣設備 (DO極低，危急狀態)\n> \n> class DecisionTreeNode:\n>     def __init__(self, feature=None, threshold=None, left=None, right=None, value=None):\n>         self.feature = feature\n>         self.threshold = threshold\n>         self.left = left\n>         self.right = right\n>         self.value = value\n> \n>     def is_leaf(self):\n>         return self.value is not None\n> \n> def calculate_gini(y):\n>     if len(y) == 0:\n>         return 0\n>     counts = np.bincount(y)\n>     probabilities = counts / len(y)\n>     return 1.0 - np.sum(probabilities ** 2)\n> \n> def split_dataset(X, y, feature, threshold):\n>     left_mask = X[:, feature] < threshold\n>     right_mask = ~left_mask\n>     return X[left_mask], y[left_mask], X[right_mask], y[right_mask]\n> \n> def find_best_split(X, y):\n>     best_gini_gain = -1\n>     best_split = {}\n>     n_samples, n_features = X.shape\n>     current_gini = calculate_gini(y)\n>     \n>     for feature in range(n_features):\n>         thresholds = np.unique(X[:, feature])\n>         for threshold in thresholds:\n>             X_left, y_left, X_right, y_right = split_dataset(X, y, feature, threshold)\n>             if len(y_left) == 0 or len(y_right) == 0:\n>                 continue\n>                 \n>             gini_left = calculate_gini(y_left)\n>             gini_right = calculate_gini(y_right)\n>             \n>             # Weighted average Gini impurity\n>             p_left = len(y_left) / n_samples\n>             p_right = len(y_right) / n_samples\n>             new_gini = p_left * gini_left + p_right * gini_right\n>             gini_gain = current_gini - new_gini\n>             \n>             if gini_gain > best_gini_gain:\n>                 best_gini_gain = gini_gain\n>                 best_split = {\n>                     \"feature\": feature,\n>                     \"threshold\": threshold,\n>                     \"X_left\": X_left,\n>                     \"y_left\": y_left,\n>                     \"X_right\": X_right,\n>                     \"y_right\": y_right\n>                 }\n>     return best_split\n> \n> def build_tree(X, y, depth=0, max_depth=3):\n>     n_samples, n_features = X.shape\n>     \n>     # Base cases: pure node, no samples, or max depth reached\n>     if len(np.unique(y)) == 1 or n_samples < 5 or depth >= max_depth:\n>         leaf_value = np.argmax(np.bincount(y)) if len(y) > 0 else 0\n>         return DecisionTreeNode(value=int(leaf_value))\n>         \n>     split = find_best_split(X, y)\n>     if not split:\n>         leaf_value = np.argmax(np.bincount(y)) if len(y) > 0 else 0\n>         return DecisionTreeNode(value=int(leaf_value))\n>         \n>     left_child = build_tree(split[\"X_left\"], split[\"y_left\"], depth + 1, max_depth)\n>     right_child = build_tree(split[\"X_right\"], split[\"y_right\"], depth + 1, max_depth)\n>     \n>     return DecisionTreeNode(\n>         feature=split[\"feature\"],\n>         threshold=split[\"threshold\"],\n>         left=left_child,\n>         right=right_child\n>     )\n> \n> def generate_aquaculture_data(n_samples=500):\n>     np.random.seed(42)\n>     # DO range: 2.0 to 8.0 mg/L\n>     dos = np.random.uniform(2.0, 8.0, n_samples)\n>     # Temp range: 18.0 to 34.0 °C\n>     temps = np.random.uniform(18.0, 34.0, n_samples)\n>     # pH range: 6.5 to 8.5\n>     phs = np.random.uniform(6.5, 8.5, n_samples)\n>     \n>     X = np.column_stack((dos, temps, phs))\n>     y = []\n>     \n>     for i in range(n_samples):\n>         do = X[i, 0]\n>         temp = X[i, 1]\n>         ph = X[i, 2]\n>         \n>         # Expert logic rules for training label assignment\n>         if do < 3.2:\n>             action = 2  # 危急：水車與打氣全部開啟\n>         elif do < 4.8 or (temp > 30.0 and do < 5.2):\n>             action = 1  # 警告：開啟打氣設備\n>         else:\n>             action = 0  # 正常：全部關閉\n>         y.append(action)\n>         \n>     return X, np.array(y, dtype=np.intp)\n> \n> def generate_python_rules(node, feature_names):\n>     if node.is_leaf():\n>         actions = [\"關閉水車與打氣機 (正常)\", \"開啟打氣機 (警告)\", \"開啟水車與打氣機 (危急)\"]\n>         return f\"    return {node.value}  # 決策結果: {actions[node.value]}\\n\"\n>         \n>     f_name = feature_names[node.feature]\n>     code = f\"    if {f_name} < {node.threshold:.2f}:\\n\"\n>     # Indent left child\n>     left_code = generate_python_rules(node.left, feature_names)\n>     code += \"\\n\".join(\"    \" + line if line else \"\" for line in left_code.split(\"\\n\")[:-1]) + \"\\n\"\n>     code += f\"    else:\\n\"\n>     # Indent right child\n>     right_code = generate_python_rules(node.right, feature_names)\n>     code += \"\\n\".join(\"    \" + line if line else \"\" for line in right_code.split(\"\\n\")[:-1]) + \"\\n\"\n>     return code\n> \n> def generate_cpp_rules(node, indent=\"  \"):\n>     if node.is_leaf():\n>         return f\"{indent}return {node.value}; // {node.value}\\n\"\n>         \n>     feature_map = [\"do_val\", \"temp_val\", \"ph_val\"]\n>     f_name = feature_map[node.feature]\n>     \n>     code = f\"{indent}if ({f_name} < {node.threshold:.2f}) {{\\n\"\n>     code += generate_cpp_rules(node.left, indent + \"  \")\n>     code += f\"{indent}}} else {{\\n\"\n>     code += generate_cpp_rules(node.right, indent + \"  \")\n>     code += f\"{indent}}}\\n\"\n>     return code\n> \n> def main():\n>     print(\"Generating training data...\")\n>     X, y = generate_aquaculture_data(500)\n>     \n>     print(\"Training Balanced Decision Tree Model (max_depth=3)...\")\n>     tree = build_tree(X, y, max_depth=3)\n>     \n>     feature_names = [\"do_val\", \"temp_val\", \"ph_val\"]\n>     \n>     # 1. Generate Python Code\n>     py_rules_code = (\n>         \"def predict_action(do_val, temp_val, ph_val):\\n\"\n>         \"    \\\"\\\"\\\"\\n\"\n>         \"    根據決定樹預測控制動作\\n\"\n>         \"    0: 全部關閉, 1: 開啟打氣機, 2: 開啟水車+打氣機\\n\"\n>         \"    \\\"\\\"\\\"\\n\"\n>     )\n>     py_rules_code += generate_python_rules(tree, feature_names)\n>     \n>     py_output = \"aquaculture_rules.py\"\n>     with open(py_output, \"w\", encoding=\"utf-8\") as f:\n>         f.write(py_rules_code)\n>     print(f\"Python 決策程式碼已輸出至: {py_output}\")\n>     \n>     # 2. Generate ESP32 Arduino Code\n>     cpp_rules = generate_cpp_rules(tree)\n>     arduino_code = f\"\"\"/*\n>  * ESP32 智慧養殖設備控制器\n>  * 自動讀取感測器，執行本地端平衡決定樹模型控制繼電器，並上傳數據\n>  */\n> \n> #include <WiFi.h>\n> #include <HTTPClient.h>\n> \n> // Wi-Fi 設定\n> const char* ssid = \"YOUR_WIFI_SSID\";\n> const char* password = \"YOUR_WIFI_PASSWORD\";\n> \n> // FastAPI 伺服器網址\n> const char* serverName = \"http://localhost:8000/api/sensor-data\";\n> \n> // 繼電器 GPIO 引腳定義\n> #define RELAY_PADDLE_WHEEL 18  // 水車繼電器引腳\n> #define RELAY_AERATOR_PUMP 19  // 打氣機繼電器引腳\n> \n> // 類比感測器引腳模擬\n> #define PIN_DO_SENSOR 34\n> #define PIN_TEMP_SENSOR 35\n> #define PIN_PH_SENSOR 36\n> \n> void setup() {{\n>   Serial.begin(115200);\n>   \n>   // 設定繼電器引腳為輸出\n>   pinMode(RELAY_PADDLE_WHEEL, OUTPUT);\n>   pinMode(RELAY_AERATOR_PUMP, OUTPUT);\n>   \n>   // 預設關閉設備 (低電平觸發或高電平觸發依硬體決定)\n>   digitalWrite(RELAY_PADDLE_WHEEL, LOW);\n>   digitalWrite(RELAY_AERATOR_PUMP, LOW);\n>   \n>   // 連線 Wi-Fi\n>   WiFi.begin(ssid, password);\n>   Serial.print(\"Connecting to Wi-Fi\");\n>   while (WiFi.status() != WL_CONNECTED) {{\n>     delay(500);\n>     Serial.print(\".\");\n>   }}\n>   Serial.println(\"\\\\nConnected to Wi-Fi successfully!\");\n> }}\n> \n> // 本地平衡決定樹預測演算法 (自動生成)\n> int predictAction(float do_val, float temp_val, float ph_val) {{\n> {cpp_rules}}}\n> \n> void executeAction(int action) {{\n>   if (action == 0) {{\n>     // 正常：關閉水車與打氣機\n>     digitalWrite(RELAY_PADDLE_WHEEL, LOW);\n>     digitalWrite(RELAY_AERATOR_PUMP, LOW);\n>     Serial.println(\"設備狀態: 全部關閉 (正常)\");\n>   }} else if (action == 1) {{\n>     // 警告：開啟打氣機，關閉水車\n>     digitalWrite(RELAY_PADDLE_WHEEL, LOW);\n>     digitalWrite(RELAY_AERATOR_PUMP, HIGH);\n>     Serial.println(\"設備狀態: 開啟打氣設備 (警告)\");\n>   }} else if (action == 2) {{\n>     // 危急：水車與打氣機全部開啟\n>     digitalWrite(RELAY_PADDLE_WHEEL, HIGH);\n>     digitalWrite(RELAY_AERATOR_PUMP, HIGH);\n>     Serial.println(\"設備狀態: 水車與打氣機全開 (危急)\");\n>   }}\n> }}\n> \n> void loop() {{\n>   // 1. 讀取感測器數值 (此處以類比讀取並映射做為範例)\n>   float do_val = (analogRead(PIN_DO_SENSOR) / 4095.0) * 10.0;     // 模擬溶氧量 0-10 mg/L\n>   float temp_val = 15.0 + (analogRead(PIN_TEMP_SENSOR) / 4095.0) * 25.0; // 模擬溫度 15-40 度\n>   float ph_val = 5.0 + (analogRead(PIN_PH_SENSOR) / 4095.0) * 5.0;       // 模擬 pH 5-10\n>   \n>   Serial.printf(\"讀取數據 - 溶氧量: %.2f mg/L | 溫度: %.2f C | pH: %.2f\\\\n\", do_val, temp_val, ph_val);\n>   \n>   // 2. 執行本地端樹狀決策模型\n>   int decision = predictAction(do_val, temp_val, ph_val);\n>   \n>   // 3. 執行硬體控制\n>   executeAction(decision);\n>   \n>   // 4. 上傳數據到 FastAPI 伺服器\n>   if (WiFi.status() == WL_CONNECTED) {{\n>     HTTPClient http;\n>     http.begin(serverName);\n>     http.addHeader(\"Content-Type\", \"application/json\");\n>     \n>     String httpRequestData = \"{{\\\\\"do_val\\\\\":\" + String(do_val, 2) + \n>                              \",\\\\\"temp_val\\\\\":\" + String(temp_val, 2) + \n>                              \",\\\\\"ph_val\\\\\":\" + String(ph_val, 2) + \n>                              \",\\\\\"decision\\\\\":\" + String(decision) + \"}}\";\n>                              \n>     int httpResponseCode = http.POST(httpRequestData);\n>     Serial.print(\"HTTP POST 回傳碼: \");\n>     Serial.println(httpResponseCode);\n>     http.end();\n>   }}\n>   \n>   delay(5000); // 每 5 秒循環一次\n> }}\n> \"\"\"\n>     \n>     cpp_output = \"esp32_controller.ino\"\n>     with open(cpp_output, \"w\", encoding=\"utf-8\") as f:\n>         f.write(arduino_code)\n>     print(f\"ESP32 Arduino 專案檔已輸出至: {cpp_output}\")\n>     print(\"模型訓練與建置完全成功！\")\n> \n> if __name__ == \"__main__\":\n>     main()\n",
+    "id": 44
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "四、 自動生成的機器學習決策邊界規則引擎",
+    "content": "aquaculture_rules.py 是由 build_decision_model.py 自動生成的規則引擎代碼。它以高度優化的 if-else 分支結構硬編碼了決定樹的切分條件（如溶解氧、溫度和 pH 的關鍵臨界值）。由於沒有外部依賴且全是簡單的邏輯判斷，其執行時間小於 1 微秒，極適合對實時性要求極高或資源極度受限的嵌入式環境。\n\n【現場邊緣推理】在池塘現場，若 ESP32 與網路伺服器斷聯，控制器內嵌的此 rules 邏輯依然能獨立運作，保證在極端環境下魚群溶氧供應不會中斷。\n\n【完整原始碼清單】aquaculture_rules.py",
+    "id": 45
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "四、 自動生成的機器學習決策邊界規則引擎",
+    "content": "> def predict_action(do_val, temp_val, ph_val):\n>     \"\"\"\n>     根據決定樹預測控制動作\n>     0: 全部關閉, 1: 開啟打氣機, 2: 開啟水車+打氣機\n>     \"\"\"\n>     if do_val < 4.81:\n>         if do_val < 3.27:\n>             return 2  # 決策結果: 開啟水車與打氣機 (危急)\n>         else:\n>             return 1  # 決策結果: 開啟打氣機 (警告)\n>     else:\n>         if do_val < 5.19:\n>             if temp_val < 30.31:\n>                 return 0  # 決策結果: 關閉水車與打氣機 (正常)\n>             else:\n>                 return 1  # 決策結果: 開啟打氣機 (警告)\n>         else:\n>             return 0  # 決策結果: 關閉水車與打氣機 (正常)\n",
+    "id": 46
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "第 15 章：魚類生理學歷屆試題專家解答",
+    "content": "AquaRAG 系統：RAG 模型製作流程與技術原理指南\n\n本指南詳細拆解 AquaRAG 系統的「檢索增強生成」(Retrieval-Augmented Generation, RAG) 建置流程、底層數學原理、程式實作方法以及服務部署架構。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nRAG 系統架構全景\n\nAquaRAG 系統的架構基於以下流程，將非結構化知識（Word 考題詳解）轉化為具備即時語意對答能力之 AI 專家系統：\n\n> graph TD\n>     A[魚類生理學歷屆試題專家解答.docx] -->|parser.py 解析| B(parsed_questions.json)\n>     B -->|embedder.py 向量化| C(nomic-embed-text 嵌入模型)\n>     C -->|NumPy tobytes| D[(rag_database.db SQLite向量資料庫)]\n>     E[使用者提問] -->|search_engine.py 檢索| F(NumPy 記憶體快取矩陣)\n>     D -->|啟動時載入快取| F\n>     F -->|餘弦相似度比對| G(取得相似度最高 Top-4 上下文)\n>     G -->|app.py 組合 Prompt| H(qwen2.5 語言模型)\n>     E --> H\n>     H -->|FastAPI SSE 串流| I[前端 SPA 網頁端顯示]\n\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 47
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "第 15 章：魚類生理學歷屆試題專家解答",
+    "content": "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n階段一：文件結構化解析 (Document Parsing)",
+    "id": 48
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "1.1 核心任務",
+    "content": "原始文件 魚類生理學歷屆試題專家解答.docx 包含多套試卷、不同題型與大量數據表格。RAG 系統的第一步是將非結構化文字切分成獨立的、語意完整的知識塊（Chunk），並將表格轉換為大語言模型易於理解的格式。\n\n1.2 實作方法與程式碼追蹤：[parser.py](file:///Users/albert/Documents/RAG/parser.py)\n\n區塊按序走訪：使用自訂函數 iter_block_items 循序走訪 Word 中的段落 (Paragraph) 與表格 (Table)，確保不因 Word 內部 XML 結構而打亂資料的前後文順序。\n\n正規表達式邊界識別：\n\n使用 ^第\\s*(\\d+)\\s*套試題：(.*)$ 辨識考試套數。\n\n使用 ^第\\s*(\\d+)\\s*題：(.*)$ 作為切割邊界，將每個問題與對應解析分流。\n\n表格 Markdown 化：大語言模型通常無法直接閱讀 XML 格式的表格。parser.py:L28-L61 的 table_to_markdown 函數遍歷表格行與單元格，將其轉換為標準的 Markdown 表格語法（包含 | 符號與 --- 標頭對齊線），若為 1x1 表格（代表原題重現），則轉為引言格式 (>)。\n\n解析輸出：最終將 300 筆結構化考題輸出為 parsed_questions.json。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n階段二：語意向量化嵌入 (Vector Embedding)",
+    "id": 49
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "2.1 核心任務",
+    "content": "將結構化文字轉換為包含豐富語意特徵的實數向量（Embedding）。向量空間中距離越近的文字，其代表的生理學語意相似度越高。\n\n2.2 實作方法與模型規格：[embedder.py](file:///Users/albert/Documents/RAG/embedder.py)\n\n向量模型：採用 Ollama 本地部署的 nomic-embed-text 模型，此模型支援長文本嵌入，輸出維度為 768 維 的浮點數向量。\n\n特徵文本建構：為了使檢索階段對「題目、年份、內分泌名稱、生理機制」等關鍵詞有更高的敏感度，系統會先對資料進行拼接：\n\n> feature_text = f\"考試套數: {exam_set} | 題號: {q_num} | 題目名稱: {q_title} | 原題內容: {orig_q} | 解析內容: {content[:1000]}\"\n\n\n這能保證檢索時無論使用者是以「題目大綱」查詢，還是以「專家解答的關鍵生理機制」查詢，均能與特徵向量吻合。\n\n呼叫本地 API：對本地 http://localhost:11434/api/embeddings 發送 HTTP POST 請求獲取向量。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n階段三：向量資料庫建置與記憶體優化 (Database & Memory Mapping)",
+    "id": 50
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "3.1 核心任務",
+    "content": "將文字、後設資料 (Metadata) 及 768 維的特徵向量進行持久化儲存，並在此基礎上實現快速檢索。",
+    "id": 51
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "3.2 儲存設計",
+    "content": "SQLite 關係型儲存：在本地 rag_database.db 建立 questions 資料表：\n\nid (INTEGER, Primary Key)\n\nexam_set (TEXT)\n\nquestion_num (TEXT)\n\nquestion_title (TEXT)\n\noriginal_question (TEXT)\n\nfull_content (TEXT)\n\nembedding (BLOB) — 存放二進位向量資料。\n\nNumPy 序列化優化：因為 SQLite 不支援原生向量型別，embedder.py 利用 numpy.ndarray.tobytes() 將 float32 陣列（長度為 $768 \\times 4$ 位元組 = $3072$ 位元組）序列化為二進位 BLOB 寫入資料庫。\n\n3.3 記憶體快取加速設計：[search_engine.py](file:///Users/albert/Documents/RAG/search_engine.py)\n\n如果每一次使用者提問都需對 SQLite 進行逐筆反序列化運算，將導致高延遲。因此在 search_engine.py:L14-L52 的 load_database 中：\n\n系統啟動時，一次性將資料庫中 300 筆資料讀入。\n\n利用 np.frombuffer(emb_bytes, dtype=np.float32) 還原向量。\n\n使用 np.vstack(emb_list) 將 300 個 768 維的向量堆疊為一個 $300 \\times 768$ 的 NumPy 矩陣 快取於記憶體中。",
+    "id": 52
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "3.2 儲存設計",
+    "content": "利用 np.frombuffer(emb_bytes, dtype=np.float32) 還原向量。\n\n使用 np.vstack(emb_list) 將 300 個 768 維的向量堆疊為一個 $300 \\times 768$ 的 NumPy 矩陣 快取於記憶體中。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n階段四：語意檢索與降級機制 (Semantic Retrieval & Failover)",
+    "id": 53
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "4.1 餘弦相似度原理",
+    "content": "當使用者輸入查詢語句 $Q$ 時，系統將其轉為向量 $\\vec{q}$。隨後，將 $\\vec{q}$ 與快取矩陣中的每一筆試題向量 $\\vec{d_i}$ 計算 餘弦相似度 (Cosine Similarity)：\n\n\\text{Similarity}(Q, D_i) = \\frac{\\vec{q} \\cdot \\vec{d_i}}{\\|\\vec{q}\\| \\|\\vec{d_i}\\|} = \\frac{\\sum_{j=1}^{768} q_j d_{i,j}}{\\sqrt{\\sum_{j=1}^{768} q_j^2} \\sqrt{\\sum_{j=1}^{768} d_{i,j}^2}}\n\n該指標的值介於 $-1$ 與 $1$ 之間，值越接近 $1$ 表示語意越相似。\n\n4.2 程式碼實作：[search_engine.py:L71-L102](file:///Users/albert/Documents/RAG/search_engine.py#L71-L102)\n\n向量矩陣乘法：\n\n> dot_product = np.dot(self.embeddings, query_emb)\n>   norm_a = np.linalg.norm(self.embeddings, axis=1)\n>   norm_b = np.linalg.norm(query_emb)\n>   similarities = dot_product / (norm_a * norm_b + 1e-8)\n\n\n這行矩陣運算可以在微秒 (microseconds) 等級內同時計算出該提問與資料庫所有 300 道試題的相似度得分。",
+    "id": 54
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "4.1 餘弦相似度原理",
+    "content": "這行矩陣運算可以在微秒 (microseconds) 等級內同時計算出該提問與資料庫所有 300 道試題的相似度得分。\n\n排序與過濾：使用 np.argsort(similarities)[::-1][:top_k] 提取相似度最高的前 $K$ 筆考題。",
+    "id": 55
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "4.3 降級備援機制 (Fallback Keyword Search)",
+    "content": "若 Ollama 服務離線、本地網路不通或缺少模型時，系統內建了 keyword_search 降級機制：\n\n進行基礎關鍵字分詞比對。\n\n命中題目（Title）給予權重 5.0，命中內容（Content）給予權重 1.0。\n\n計算出加權得分，並以線性映射方式回傳一個假的相似度分數。這確保了即便在 AI 模型基礎設施故障的情況下，前端使用者仍能透過關鍵字找到正確的專家解答。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n階段五：檢索增強生成與 SSE 串流 (SSE Streaming Generation)",
+    "id": 56
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "5.1 上下文注入與 Prompt 工程",
+    "content": "搜尋引擎返回的 Top-4 專家解答，會作為外部知識源，與對話歷史紀錄一併注入給大語言模型。在 app.py:L170-L185 中建構了嚴格的 Prompt 模板：\n\n角色定位：指定為「魚類生理學」學術與國考專家。\n\n約束條件：要求高度學術性、善用 Markdown 呈現、必須是繁體中文、不得複製無關段落，必須融會貫通。\n\n引用揭露：將 Top-4 考題的 exam_set 與 question_num 格式化，引導模型參考。",
+    "id": 57
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "5.2 伺服器傳送事件 (Server-Sent Events, SSE) 串流",
+    "content": "為了改善大語言模型生成長文本時的等待時間（TTFT, Time To First Token），後端使用 FastAPI 的 StreamingResponse 實現 SSE 串流技術：\n\n傳送引用資訊：第一個推送的事件為 citations 事件，包含所有被引用考題的 ID、試卷名稱與題號，讓前端能第一時間渲染「參考文獻」區塊。\n\n傳送文本流：以 chunk 為單位，向本地 qwen2.5 獲取生成的文字流，並包裝為 text 事件逐步推送：\n\n> event: text\n>    data: {\"text\": \"生成內容...\"}\n\n\n完成訊號：生成完畢後發送 done 事件，讓前端 JavaScript 斷開連接並完成渲染。\n\nAquaRAG 向量檢索與生成 (RAG) 系統建置指南\n\n基於大模型與向量資料庫的「魚類生理學」國考解答檢索系統\n\n技術白皮書  |  編製：Antigravity  |  時間：2026年6月9日\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 58
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "一、 系統架構簡介 (System Overview)",
+    "content": "AquaRAG 是一套專為國家考試「魚類生理學」科目設計的「檢索增強生成」(Retrieval-Augmented Generation, RAG) 系統。 RAG 技術透過將外部專業知識庫（如歷屆考題與專家詳解）切碎並進行向量化儲存，當使用者輸入提問時，系統會即時檢索最相關的內容作為上下文 (Context)， 並提供給本地大語言模型進行生成，藉此消除大模型的「幻覺」並給出精準、附帶文獻來源的專業解答。",
+    "id": 59
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 RAG 模型建置流程與方法 (Complete Pipeline & Methodology)",
+    "content": "1. 文件結構化解析 (Document Parsing)\n將原始 Word 解答文件 (魚類生理學歷屆試題專家解答.docx) 解析。由於考題中包含複雜的段落、表格與特定格式，系統藉由 python-docx 遍歷所有段落與表格，並以正則表達式識別「第 X 套試題」與「第 X 題」。表格則轉譯為 Markdown Table 以利大模型理解，最終將 300 題結構化輸出為 JSON 檔。\n\n2. 語意向量化嵌入 (Vector Embedding)\n呼叫 Ollama 本地 API 的 `nomic-embed-text` 向量模型（維度為 768 維）。為了獲得最佳的檢索精準度，系統將「考試套數 + 題目名稱 + 原題重現 + 專家解答的前 1000 個字」拼接為一段文本，發送給模型產生語意向量。這確保了問題與答案的核心語意皆被編碼進向量空間。\n\n3. SQLite 向量資料庫建置 (Database Storage)\n將產生的 768 維向量轉換為 float32 numpy 數組，並以二進位 (BLOB) 格式儲存於 SQLite 資料庫 (`rag_database.db`) 中，同時一併儲存試題ID、考試套數、題號、題目與完整答案內容，建立高效率的關係型向量資料庫。",
+    "id": 60
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 RAG 模型建置流程與方法 (Complete Pipeline & Methodology)",
+    "content": "4. 語意檢索與餘弦相似度計算 (Cosine Similarity Retrieval)\n當使用者輸入問題時，系統將問題同樣轉為 `nomic-embed-text` 向量，並以 NumPy 在記憶體中快速與資料庫的所有試題向量進行餘弦相似度 (Cosine Similarity) 計算，篩選出關聯度最高的前 4 題 (Top-4) 作為參考資料來源。若向量服務異常，系統則會自動降級為基於 TF-IDF 邏輯的關鍵字匹配。\n\n5. 檢索增強生成與 SSE 串流 (Generation & Streaming)\n系統將 Top-4 考題的專家解答作為「Context」，與使用者的問題、歷史對話一併包裝進預設的 System Prompt 中，發送給本地 `qwen2.5` 語言模型。最終透過 FastAPI 的 `StreamingResponse` 配合伺服器發送事件 (Server-Sent Events, SSE) 技術，實時將模型生成的解答串流顯示於前端 UI。",
+    "id": 61
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "三、 個別程式功能描述 (Program/Script Descriptions)",
+    "content": "• parser.py\n\n負責將 DOCX 轉換為結構化 JSON。\n• 使用 `iter_block_items` 循序走訪 Word 中的段落與表格，維持文件順序。\n• 以正則表達式 `^第\\s*(\\d+)\\s*套試題：` 與 `^第\\s*(\\d+)\\s*題：` 自動切割試卷與題號。\n• 包含 `table_to_markdown` 函數，將 Word 複雜表格自動轉為標準 Markdown 格式，以完美保留對照表等生理學數據。\n• 輸出 `parsed_questions.json` 供後續向量化使用。\n\n• embedder.py\n\n負責調用向量模型並建置 SQLite 資料庫。\n• 讀取 `parsed_questions.json`，對每道題目拼接特徵文本。\n• 透過 HTTP 請求調用 Ollama 的 `http://localhost:11434/api/embeddings` 連接埠，獲取 768 維的語意特徵向量。\n• 建立 `questions` 資料表（包含：id, exam_set, question_num, question_title, original_question, full_content, embedding）。\n• 使用 NumPy 的 `.tobytes()` 將向量數組存成 BLOB 欄位，加快資料庫寫入效能。\n\n• search_engine.py",
+    "id": 62
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "三、 個別程式功能描述 (Program/Script Descriptions)",
+    "content": "• search_engine.py\n\n本系統的搜尋引擎核心模組。\n• 在類別 `SearchEngine` 初始化時，一次性將 SQLite 的二進位向量取出並還原為 NumPy 矩陣，快取於記憶體中以加速比對。\n• 提供 `search()` 函數，輸入自然語言查詢，透過 Cosine Similarity 計算與所有考題的相似分數並排序。\n• 內建 `keyword_search` 降級備援機制，當 Ollama 離線或找不到模型時，自動切換為關鍵字計分搜尋，確保服務不中斷。\n\n• app.py\n\n本系統的後端 Web 服務器 (FastAPI)。\n• 提供多個 API 端點，包括統計資訊 (`/api/stats`)、考題大綱 (`/api/exam-sets`) 以及單題詳解 (`/api/question/{qid}`)。\n• 實作 `/api/chat` 端點，負責接收聊天請求，先調用 `SearchEngine` 取得 Context，再透過 `requests` 以 Stream 方式向 Ollama 的 `qwen2.5` 請求生成解答。\n• 透過異步生成器以 Server-Sent Events (SSE) 協定，向前端輸出包含了考題引用標籤 (citations) 與流式文字。\n\n• static/app.js & index.html",
+    "id": 63
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "三、 個別程式功能描述 (Program/Script Descriptions)",
+    "content": "• static/app.js & index.html\n\n前端單頁式應用程式 (SPA) 的實作。\n• `index.html`：基於 CSS Grid 與 Flexbox 打造的極致深色質感動態介面，規劃了「RAG 智能對話」、「語意搜尋」、「歷屆試題瀏覽」與「資料統計」四大分頁。\n• `app.js`：處理頁面切換、即時查詢過濾、呼叫 `/api/chat` 讀取串流訊息並將 Markdown 即時轉譯為 HTML，並在對話泡泡中動態加入參考文獻來源的超連結按鈕。",
+    "id": 64
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "四、 系統快速重構與執行順序 (Build Pipeline Commands)",
+    "content": "| 建置順序 | 執行指令 | 階段輸出成果 |\n| --- | --- | --- |\n| Step 1: 文件解析 | python3 parser.py | 將 Word 轉為結構化的 parsed_questions.json |\n| Step 2: 向量庫初始化 | python3 embedder.py | 呼叫 Ollama 生成向量並建立 rag_database.db |\n| Step 3: 啟動後端服務 | python3 app.py | 啟動 FastAPI，監聽 http://localhost:8000 |\n\n\nAquaRAG 歷屆試題檢索生成系統\n系統架構與本地大模型串接技術手冊\n\n文件編號：AQ-RAG-TECH-001  |  編寫：Antigravity  |  時間：2026年6月9日\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 65
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "1.1 資料解析階段 (Data Parsing)",
+    "content": "本階段主要工作為將非結構化的 Word 歷屆試題庫 (docx 格式) 轉為結構化的 JSON 資料結構。\n• 區塊迭代演算法：藉由 python-docx 內部 XML 結構提取函數 iter_block_items 循序遍歷 Paragraph 與 Table 元素，確保段落與表格的相對順序維持 100% 正確。\n• 正則篩選識別：透過正則表達式識別考試年度（如「第 1 套試題：082年公務人員升等考試...」）與題號（如「第 1 題：...」），進行動態樹狀結構切割。\n• 表格 Markdown 化：為了避免 RAG 在處理生理學對照表或數據矩陣時遺失結構，編寫 table_to_markdown 模組將 docx 的多列多行 Table 轉換成標準 Markdown 表格，單格多行則自動轉為區塊引用(>)，最後合併所有內文輸出成具有試題元數據的 parsed_questions.json 檔。",
+    "id": 66
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "1.2 資料向量化與儲存階段 (Vector Embedding & Storage)",
+    "content": "將解析好的 JSON 題庫建立語意索引並寫入向量資料庫。\n• 語意區塊拼接 (Chunk Construction)：RAG 檢索的關鍵在於特徵拼接。系統將「考試科目套數 + 題目名稱 + 原題重現 + 專家解答前 1000 字」整合成一段核心文本進行向量運算，確保包含考題名稱與答案前段的代表性生理學描述。\n• 向量提取：呼叫本地 Ollama 的 /api/embeddings 接口，以 nomic-embed-text 模型將拼接文本壓縮為 768 維浮點數向量。\n• 資料庫儲存：採用 SQLite 本地資料庫。因 SQLite 無原生向量類型，系統使用 NumPy 的 tobytes() 方法將 float32 數組轉成二進位 BLOB 儲存於 embedding 欄位中，提高儲存效率與讀取速度。",
+    "id": 67
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "1.3 語意檢索階段 (Semantic Search Engine)",
+    "content": "當使用者輸入自然語言問題時，進行快速精準的語意比對。\n• 記憶體矩陣快取：SearchEngine 在初始化時，一次性自 SQLite 讀取所有資料，將 BLOB 還原為 NumPy 的 float32 陣列，並拼裝成一個 shape 為 (300, 768) 的向量矩陣儲存於記憶體，避免每次檢索皆需發送 SQL 請求與反序列化。\n• 餘弦相似度比對：當提問進來，先以同模型產生查詢向量 (1, 768)，再使用 Numpy 進行點積 (dot product) 與範數乘積計算，求出所有考題的夾角餘弦值，由大到小排序回傳最相關的前 K 個結果。\n• 降級機制 (Fallback)：若 Ollama 離線或網路超時，搜尋引擎會自動啟用 TF-IDF 關鍵字權重比對（對標題匹配加權 5.0，對內文匹配加權 1.0），確保系統高可用性。",
+    "id": 68
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "2.1 語意向量嵌入模型：nomic-embed-text",
+    "content": "• 維度大小 (Dimensionality)：768 維。\n• 上下文長度 (Context Window)：最大支援 8192 個 Token。\n• 特性：Nomic Embed 是目前本地開源模型中性能極佳的文字嵌入模型。其在繁體中文及學術專業術語（例如生理機制、化學名詞）的語意對齊上表現優異，能精準捕捉近義詞的餘弦相似性距離。",
+    "id": 69
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "2.2 生成大語言模型：qwen2.5 (7B)",
+    "content": "• 參數量級：70 億參數 (7B)。\n• 上下文視窗：128k Tokens。\n• 特性：Qwen-2.5 系列在中文自然語言處理任務中處於領先地位。其對於臺灣學術慣用的繁體中文語境、醫學/生理學專業論述之理解與表達能力極佳，並具有高度指令遵循能力，能嚴格遵循系統提供的參考文獻進行彙整，避免無中生有的幻覺表現。",
+    "id": 70
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "3.1 FastAPI 與 Ollama API 端點之 HTTP 串接",
+    "content": "系統後端 app.py 與 Ollama 模型引擎之間完全採用標準 RESTful HTTP APIs 進行通訊：\n1. 向量生成：\n   - 端點：POST http://localhost:11434/api/embeddings\n   - Payload 格式：{\"model\": \"nomic-embed-text\", \"prompt\": \"欲向量化之文本\"}\n   - 回傳格式：{\"embedding\": [0.012, -0.054, ... 共768個浮點數]}\n2. 對話生成 (流式傳輸)：\n   - 端點：POST http://localhost:11434/api/chat\n   - Payload 格式：{\n       \"model\": \"qwen2.5\",\n       \"messages\": [ {\"role\": \"user\", \"content\": \"Prompt 內容\"} ],\n       \"stream\": true\n     }\n   - 串流回傳：每次回報包含部分字元之 JSON 行（JSON lines）。",
+    "id": 71
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "3.2 脈絡注入與 Prompt 工程設計",
+    "content": "為防止大模型偏離主題，app.py 在將請求送至 qwen2.5 前，會先進行檢索資料庫的 Top-4 Chunks 注入，組裝成最終 Prompt：\n1. 注入結構：將 4 個檢索結果串接為字串：\n   [來源：X年薦任升等 - 第X題 | 題目：... | 專家解答：...]\n2. 系統指導規則 (System Instructions)：\n   - 明確要求 AI 身分為「魚類生理學學術與國考輔導專家」。\n   - 必須根據所附的專家解答回答問題，使用 Markdown 表格、粗體與列表梳理機制。\n   - 回答必須為繁體中文，且嚴禁逐字抄襲，而應進行彙整與歸納。",
+    "id": 72
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "3.3 Server-Sent Events (SSE) 串流傳輸機制",
+    "content": "為了提供流暢的使用者體驗，系統採用 SSE 技術進行實時文字傳輸：\n1. 後端串流生成器 (Generator)：\n   - app.py 的 sse_chat_generator 使用 Python 異步產生器 yield 數據。\n   - 第一個產出的事件為引用標籤 (citations)：`event: citations\\ndata: [JSON列表]\\n\\n`\n   - 隨後每當 Ollama 產生一個 Token，後端便發送：`event: text\\ndata: {\"text\": \"新生成的字\"}\\n\\n`\n   - 生成結束發送：`event: done\\ndata: {}\\n\\n`\n2. 前端 JS 流式讀取：\n   - 使用 fetch 發送 POST 請求至 /api/chat，取得 response.body.getReader()。\n   - 使用 TextDecoder 按字節解碼，以雙換行 (\\n\\n) 拆分 SSE 事件。\n   - 使用正則提取 event 與 data，若為 citations 則於對話泡泡底部動態生成超連結引用標籤；若為 text 則累加字元並通過 Markdown 轉譯器即時更新對話框的 InnerHTML。\n\n自建小型大語言模型 (LLM) 技術指南\n從零開始的 Transformer 設計、訓練與部署\n\n技術指南  |  編寫：Antigravity  |  時間：2026年6月9日\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 73
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "一、 自建小型 LLM 的五大核心步驟",
+    "content": "要從零建置一個專屬的小型大語言模型，完整的開發生命週期包含以下五個核心步驟：\n\n1. 資料收集與預處理 (Data Preparation)\n模型的能力完全取決於餵給它的資料。首先需收集數十 MB 到數 GB 的文本資料（例如維基百科、專業領域書籍、對話紀錄），進行清洗（去重、去除無意義符號、轉換為統一字元編碼，如 UTF-8）。\n\n2. 設計分詞器 (Tokenizer)\n計算機無法理解文字，必須透過分詞器將文字對應成整數 ID 列表。對於小型模型，可採用簡易的字元級分詞器 (Character-level Tokenizer，如每個字元一個 ID) 或調用 BPE (Byte-Pair Encoding) 分詞器（如 Hugging Face 的 Tokenizers 庫，將常用字詞組合成 Token），並產生一個詞表 (Vocabulary)。\n\n3. 定義模型架構 (Model Architecture)\n現代 LLM 普遍採用 Decoder-Only（僅解碼器）的 Transformer 架構（與 GPT 系列、Llama 系列相同）。核心包含：自注意力機制 (Self-Attention)、多頭注意力 (Multi-Head Attention)、前饋神經網路 (Feed-Forward Network) 以及殘差連接與層歸一化 (Layer Normalization)。",
+    "id": 74
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "一、 自建小型 LLM 的五大核心步驟",
+    "content": "4. 模型預訓練 (Pre-training / Next-token Prediction)\n此階段模型學習語言的基本規律與知識。給定前 N 個 Token，預測第 N+1 個 Token。利用 Cross-Entropy Loss 計算預測與真實字元的差距，透過 AdamW 優化器不斷調整權重參數。一般在 GPU (如 NVIDIA RTX 系列或 Mac M 系列晶片的 Unified Memory) 上訓練數小時至數天。\n\n5. 指令微調與推理 (Supervised Fine-Tuning & Inference)\n預訓練完成的模型只會「接龍」文字。為了讓它能回答問題，需要進行「指令微調」(SFT)，餵入「問題-答案」對（如：Q: 什麼是滲透壓？ A: 滲透壓是...）。微調後即可透過貪婪搜尋 (Greedy Search) 或 Top-p 取樣演算法進行文字推理生成。",
+    "id": 75
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 核心架構實作：PyTorch Mini-GPT 原始碼",
+    "content": "以下為基於 PyTorch 框架實作的迷你 GPT 模型核心結構。它展示了如何定義多頭注意力、Transformer 區塊，以及自回歸的語言模型本體：",
+    "id": 76
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 核心架構實作：PyTorch Mini-GPT 原始碼",
+    "content": "以下為基於 PyTorch 框架實作的迷你 GPT 模型核心結構。它展示了如何定義多頭注意力、Transformer 區塊，以及自回歸的語言模型本體：\n\nimport torch\nimport torch.nn as nn\nfrom torch.nn import functional as F\n\nclass Head(nn.Module):\n    \"\"\" 單個自注意力頭 (Single Self-Attention Head) \"\"\"\n    def __init__(self, head_size, n_embd, block_size):\n        super().__init__()\n        self.key = nn.Linear(n_embd, head_size, bias=False)\n        self.query = nn.Linear(n_embd, head_size, bias=False)\n        self.value = nn.Linear(n_embd, head_size, bias=False)\n        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))\n\n    def forward(self, x):\n        B, T, C = x.shape\n        k = self.key(x)    # (B, T, head_size)\n        q = self.query(x)  # (B, T, head_size)\n        # 計算注意力分數 (Attention Scores)\n        wei = q @ k.transpose(-2, -1) * C**-0.5 # (B, T, T)\n        wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf')) # 因果遮罩\n        wei = F.softmax(wei, dim=-1)\n        # 加權求和\n        v = self.value(x)  # (B, T, head_size)\n        return wei @ v     # (B, T, head_size)\n\nclass MultiHeadAttention(nn.Module):\n    \"\"\" 多頭自注意力機制 (Multi-Head Attention) \"\"\"\n    def __init__(self, num_heads, head_size, n_embd, block_size):\n        super().__init__()\n        self.heads = nn.ModuleList([Head(head_size, n_embd, block_size) for _ in range(num_heads)])\n        self.proj = nn.Linear(n_embd, n_embd)\n\n    def forward(self, x):\n        out = torch.cat([h(x) for h in self.heads], dim=-1)\n        return self.proj(out)\n\nclass FeedForward(nn.Module):\n    \"\"\" 簡單線性前饋網路 \"\"\"\n    def __init__(self, n_embd):\n        super().__init__()\n        self.net = nn.Sequential(\n            nn.Linear(n_embd, 4 * n_embd),\n            nn.ReLU(),\n            nn.Linear(4 * n_embd, n_embd)\n        )\n\n    def forward(self, x):\n        return self.net(x)\n\nclass Block(nn.Module):\n    \"\"\" Transformer 運算區塊 (Block) \"\"\"\n    def __init__(self, n_embd, n_head, block_size):\n        super().__init__()\n        head_size = n_embd // n_head\n        self.sa = MultiHeadAttention(n_head, head_size, n_embd, block_size)\n        self.ffwd = FeedForward(n_embd)\n        self.ln1 = nn.LayerNorm(n_embd)\n        self.ln2 = nn.LayerNorm(n_embd)\n\n    def forward(self, x):\n        x = x + self.sa(self.ln1(x))   # 殘差連接與 LayerNorm\n        x = x + self.ffwd(self.ln2(x))\n        return x\n\nclass MiniGPT(nn.Module):\n    \"\"\" 迷你 GPT 語言模型本體 \"\"\"\n    def __init__(self, vocab_size, n_embd, n_head, n_layer, block_size):\n        super().__init__()\n        self.token_embedding_table = nn.Embedding(vocab_size, n_embd)\n        self.position_embedding_table = nn.Embedding(block_size, n_embd)\n        self.blocks = nn.Sequential(*[Block(n_embd, n_head, block_size) for _ in range(n_layer)])\n        self.ln_f = nn.LayerNorm(n_embd)\n        self.lm_head = nn.Linear(n_embd, vocab_size)\n        self.block_size = block_size\n\n    def forward(self, idx, targets=None):\n        B, T = idx.shape\n        tok_emb = self.token_embedding_table(idx) # (B, T, n_embd)\n        pos_emb = self.position_embedding_table(torch.arange(T, device=idx.device)) # (T, n_embd)\n        x = tok_emb + pos_emb\n        x = self.blocks(x)\n        x = self.ln_f(x)\n        logits = self.lm_head(x) # (B, T, vocab_size)\n\n        loss = None\n        if targets is not None:\n            B, T, C = logits.shape\n            logits = logits.view(B*T, C)\n            targets = targets.view(B*T)\n            loss = F.cross_entropy(logits, targets)\n        return logits, loss",
+    "id": 77
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "三、 小型 LLM 之參數規模與硬體資源估算",
+    "content": "| 模型等級/參數 | 適合訓練語料大小 | 硬體需求 (GPU VRAM) | 典型代表模型 |\n| --- | --- | --- | --- |\n| Tiny GPT (約 10M - 50M) | 10 MB - 100 MB | 2 GB - 4 GB (一般家用電腦可跑) | Character-level GPT-2 |\n| Small LLM (約 100M - 500M) | 100 MB - 2 GB | 6 GB - 8 GB (RTX 4060 等級) | GPT-2 Small / BERT |\n| SLM (1B - 3B 參數量級) | 10 GB - 100 GB | 16 GB+ VRAM (單卡 RTX 4090) | Qwen2.5-1.5B / Llama-3.2-1B / Gemma-2B |\n| Standard LLM (7B - 8B) | 500 GB - 5 TB | A100 / H100 多卡叢林 | Llama-3-8B / Qwen2.5-7B |\n",
+    "id": 78
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "四、 實務開發心法與建議路徑",
+    "content": "若欲在個人環境快速建置一個能用的專屬模型，建議採取以下「捷徑」避開極高昂的預訓練成本：\n1. 使用預訓練權重做微調 (LoRA Fine-tuning)：不從零訓練 Transformer。直接從 Hugging Face 下載 Llama-3.2-1B 或 Qwen2.5-1.5B 的開源權重，利用 LoRA (Low-Rank Adaptation) 技術，在 1 張消費級 GPU 上花費幾小時，微調您自己的垂直領域問答集。\n2. 使用 Hugging Face TRL 庫：使用它的 SFTTrainer，只需撰寫 10 行 Python 代碼即可完成微調，對硬體及演算法優化的難度大幅降低。\n3. 本地推論與部屬：訓練好後，將權重匯出為 GGUF 格式，即可直接放進 Ollama 中執行，達成與您本專案相似的 RAG 架構串接。\n\nQwen-2.5 模型容量與 RAG 系統上下文限制技術說明書\n\n在檢索增強生成（RAG）架構下，系統的「資料承載能力」必須拆分為「本地知識庫儲存量」與「大語言模型單次閱讀容量（上下文視窗）」兩大方面。本文件將深度解析這兩個限制的技術規格、數學邏輯、對系統效能的影響以及 AquaRAG 系統的配置優化。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 79
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "一、 本地知識庫儲存量 (Storage Capacity)",
+    "content": "這部分代表系統可以「匯入」多少歷屆考卷和詳解檔案以供隨時搜尋。",
+    "id": 80
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "1.1 資料庫底層限制",
+    "content": "AquaRAG 系統使用的是本地關係型資料庫 SQLite：\n\n最大檔案限制：SQLite 支援的單一資料庫檔案最大可達 140 TB。\n\n資料條數上限：理論上可儲存最多 $2^{64}$（約 1,800 京）條紀錄。\n\n資料規模能力：這意味著您可以將全國所有科目數十年的國家考試、教科書、學術論文全部匯入，資料庫都可輕鬆裝下。",
+    "id": 81
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "1.2 向量資料量與記憶體快取能力",
+    "content": "對於每一筆匯入的資料，embedder.py 會產生一個 768 維的 nomic-embed-text 向量。\n\n空間消耗：一個 768 維的單精度浮點數（float32）向量佔用 $768 \\times 4 = 3072$ 位元組（約 3 KB）。即使匯入 100,000 題，純向量數據也僅佔 300 MB 左右。\n\n檢索運算速度：系統啟動時，會將所有向量載入為 NumPy 2D 矩陣（$N \\times 768$）。在記憶體中計算 $100,000 \\times 768$ 矩陣與查詢向量的餘弦相似度，利用 CPU 的 AVX 指令集加速只需約 10 ~ 20 毫秒。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 82
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 Qwen-2.5 語言模型單次閱讀容量 (Context Window)",
+    "content": "這部分代表當使用者提出一個問題時，系統從知識庫撈出關聯資料後，一次最多可以塞給 Qwen-2.5 模型看多少字。",
+    "id": 83
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "2.1 128K 上下文視窗（Context Window）",
+    "content": "Qwen-2.5（包括 7B、14B、72B 等不同參數規格）具備強大的長文本處理能力：\n\nToken 上限：原生支援 128,000 個 Tokens 的上下文長度。\n\n中文字元轉換率：在 Qwen 的分詞器（Tokenizer）中，1 個 Token 平均大約代表 0.6 到 0.8 個繁體中文字（視標點符號與專有名詞而定）。\n\n字數極限：128K Tokens 約等同於 90,000 到 100,000 個繁體中文漢字。\n\n\\text{最大中文閱讀量} \\approx 128,000 \\times 0.75 \\approx 96,000 \\text{ 字}\n\n這意味著您可以把一本大約 200 頁的魚類生理學精簡講義一次性丟給模型，它仍能完整讀取。",
+    "id": 84
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "2.2 旋轉位置編碼（RoPE）與長文本外推",
+    "content": "Qwen-2.5 能夠穩定讀取 128K 文本的關鍵在於其採用了旋轉位置編碼（Rotary Position Embedding, RoPE）的外推與動態縮放技術。這能讓模型在處理遠遠超出訓練長度的文字時，依然能準確辨識各個詞彙在段落中的物理相對位置，而不會發生位置資訊混亂。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 85
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "三、 單次餵入過多資料的負面效影響",
+    "content": "雖然 Qwen-2.5 理論上一次可以讀入近 10 萬字，但在實務 RAG 系統設計中，絕對不建議一次塞滿 128K 的上下文，原因如下：",
+    "id": 86
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "3.1 運算延遲（Latency）暴增",
+    "content": "大語言模型在推理時分為兩個階段：\n\nPrefill（預填充）階段：模型閱讀並處理您輸入的所有 Context。其計算複雜度與輸入長度 $L$ 呈二次方關係（$O(L^2)$）。當 Context 長度從 4K 提升到 128K 時，模型「吐出第一個字的時間（TTFT, Time To First Token）」會從不到 1 秒暴增至數十秒。\n\nDecode（解碼）階段：每生成一個新字，都需要在記憶體中讀寫龐大的 KV Cache（鍵值快取）。128K 的 KV Cache 會佔用數十 GB 的顯示記憶體（VRAM），大幅降低生成速度。",
+    "id": 87
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "3.2 資訊迷失效應（\"Lost in the Middle\"）",
+    "content": "學術研究表明，大語言模型對 Prompt（提示詞）中「最開頭」與「最結尾」的資訊記憶最深刻。當上下文長度拉長到數萬字時，位於長文本中間部分的關聯資料被模型忽略或遺忘的機率會大幅上升，導致回答精準度不升反降。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 88
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "四、 AquaRAG 系統的最佳實務配置",
+    "content": "為了保證最流暢的使用體驗與最高的答題準確度，本系統在 app.py 中採取了以下優化配置：\n\nTop-K 限制（設為 4）：\n\n系統預設每次只檢索出關聯度最高的前 4 道題目與詳解（app.py:L147）。這 4 題的總字數大約在 4,000 到 8,000 字之間（約 6K Tokens）。\n\n效能優勢：\n\nTTFT 小於 0.5 秒：使用者提問後，幾乎可以在半秒內立刻看到模型開始串流輸出文字。\n\n注意力高度集中：模型可以 100% 聚焦在這 4 題的專家解答上，給出高度契合原題目的專業答案。\n\n節省硬體顯存：在本地端執行時，這能確保一般的電腦硬體也能流暢運行，避免因顯存溢出（Out of Memory）而崩潰。\n\nLLM 大語言模型：自建預訓練與微調 (Fine-tuning) 實務指南\n\n技術白皮書  |  編寫：Antigravity  |  時間：2026年6月9日\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 89
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "一、 兩種訓練路線之深度剖析與資源對比",
+    "content": "在建立專屬大語言模型時，開發者面臨「從零開始預訓練」與「下遊微調（Fine-tuning）」兩條技術路徑。這兩者的定位、硬體需求與時間成本有著巨大的鴻溝。",
+    "id": 90
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "1.1 從零開始預訓練 (Pre-training from Scratch)",
+    "content": "• 定義：從隨機初始化的權重開始，餵入未標註的海量文本，透過無監督的下一標記預測 (Next-token Prediction) 進行訓練。\n• 優點：可自訂全新的詞表與架構，完全適應特定的語言或極端垂直的代碼格式。\n• 缺點與資源黑洞：這是極端耗費算力的路徑。要讓一個 1.5B ~ 7B 參數的模型具備基本邏輯與人類語言常識，需要吞噬數千億甚至數兆個 Token。個人或小團隊若無數十張 H100 顯示卡並持續執行數週，極難取得實用成果。若僅用單卡訓練數小時，模型產出的結果將只是語無倫次的無效拼湊。",
+    "id": 91
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "1.2 下遊微調 (Fine-tuning / SFT)",
+    "content": "• 定義：導入已在海量語料上訓練完畢的「開源基底模型」（如 Qwen2.5-1.5B, Llama-3.2-1B），保留其強大的語言常識，僅使用特定的高質量指令問答對 (Instruction Q&A) 進行有監督微調 (Supervised Fine-Tuning)。\n• 優點：極高效率。利用模型已有的語言理解能力，只需專注學習新領域的專有名詞、邏輯規律與輸出格式。在個人單卡 GPU 或 Mac M 晶片上，僅需 30 分鐘至數小時便能展現驚人效果，是當前學術界與產業界的主流選擇。",
+    "id": 92
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "1.2 下遊微調 (Fine-tuning / SFT)",
+    "content": "| 訓練方式 | 模型規模 | 語料數據量 | 硬體需求 (GPU) | 所需時間 |\n| --- | --- | --- | --- | --- |\n| 從零預訓練<br>(Toy Model) | 10M ~ 50M<br>(超迷你型) | 10 MB ~ 100 MB | 1x RTX 4060<br>(家用顯卡) | 30分鐘 ~ 2小時<br>(僅做原理練習) |\n| 從零預訓練<br>(實用 SLM) | 1B ~ 3B<br>(小量級模型) | 100 GB ~ 1 TB | 8x A100/H100<br>(企業級叢集) | 2週 ~ 2個月<br>(成本極其高昂) |\n| LoRA 微調<br>(SLM下遊) | 1B ~ 3B<br>(基於現成模板) | 1 MB ~ 20 MB<br>(數千問答對) | 1x RTX 4060 / 4090<br>或 Mac M 晶片 | 30分鐘 ~ 3小時<br>(高度推薦首選) |\n| QLoRA 微調<br>(標準大模型) | 7B ~ 8B<br>(如 Llama-3-8B) | 5 MB ~ 50 MB<br>(特定領域數據) | 1x RTX 4090 (24G)<br>或單張租用 GPU | 2小時 ~ 6小時<br>(可達商用效果) |\n",
+    "id": 93
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 實務微調 (Fine-tuning) 關鍵技術",
+    "content": "若要在個人或有限算力下進行微調，必須依賴「參數高效微調」(Parameter-Efficient Fine-Tuning, PEFT) 技術：\n\n1. LoRA (Low-Rank Adaptation) 低秩適應\nLoRA 保持預訓練模型權重 (W) 凍結，並在 Transformer 的注意力矩陣旁引入兩個低維度的旁路權重矩陣 A 與 B（Rank r 通常設為 8 或 16）。訓練時僅更新 A 與 B 的參數，使需要訓練的參數降低 99.9% 以上，極大地減少了 GPU 顯存 (VRAM) 消耗與訓練時間，且幾乎不損失準確度。\n\n2. QLoRA (Quantized LoRA) 量化低秩適應\nQLoRA 進一步將底層預訓練模型以 4-bit NormalFloat (NF4) 格式進行高精度量化與凍結。這使得一個 7B 參數量級的模型，其基礎權重顯存佔用從原本的 16GB 暴降到僅約 5GB。搭配 LoRA 進行微調時，使得僅有 8GB 顯存的消費級 GPU（如 RTX 4060）也能輕鬆微調 7B 大模型，徹底打破了高不可攀的硬體門檻。",
+    "id": 94
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "3.1 準備微調數據格式 (dataset.jsonl)",
+    "content": "微調數據一般採 JSONL 格式，每一行代表一筆對話樣本。為了配合 Llama/Qwen 的 Chat 模板，格式如下：\n\n{\"messages\": [{\"role\": \"system\", \"content\": \"你是一個魚類生理學專家。\"}, {\"role\": \"user\", \"content\": \"硬骨魚如何調節滲透壓？\"}, {\"role\": \"assistant\", \"content\": \"淡水魚透過吸收鹽分與排出稀尿調節，海水魚則相反...\"}]}\n{\"messages\": [{\"role\": \"system\", \"content\": \"你是一個魚類生理學專家。\"}, {\"role\": \"user\", \"content\": \"魚類呼吸系統如何運作？\"}, {\"role\": \"assistant\", \"content\": \"魚類利用鰓進行對流交換...\"}]}",
+    "id": 95
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "3.2 完整微調 Python 程式碼範例",
+    "content": "以下是調用 Hugging Face `transformers`、`peft` 及 `trl` 庫進行 QLoRA 微調的標準 Python 程式碼：",
+    "id": 96
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "3.2 完整微調 Python 程式碼範例",
+    "content": "以下是調用 Hugging Face `transformers`、`peft` 及 `trl` 庫進行 QLoRA 微調的標準 Python 程式碼：\n\nimport torch\nfrom datasets import load_dataset\nfrom transformers import (\n    AutoModelForCausalLM,\n    AutoTokenizer,\n    BitsAndBytesConfig,\n    TrainingArguments\n)\nfrom peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training\nfrom trl import SFTTrainer\n\n# 1. 設定模型與資料路徑\nmodel_id = \"Qwen/Qwen2.5-1.5B-Instruct\"\ndataset_path = \"dataset.jsonl\"\n\n# 2. 配置 4-bit 量化參數 (QLoRA)\nbnb_config = BitsAndBytesConfig(\n    load_in_4bit=True,\n    bnb_4bit_quant_type=\"nf4\",\n    bnb_4bit_compute_dtype=torch.float16,\n    bnb_4bit_use_double_quant=True\n)\n\n# 3. 載入 Tokenizer 與模型\ntokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)\ntokenizer.pad_token = tokenizer.eos_token\n\nmodel = AutoModelForCausalLM.from_pretrained(\n    model_id,\n    quantization_config=bnb_config,\n    device_map=\"auto\",\n    trust_remote_code=True\n)\nmodel = prepare_model_for_kbit_training(model)\n\n# 4. 配置 PEFT / LoRA 參數\npeft_config = LoraConfig(\n    r=16,                       # LoRA Rank\n    lora_alpha=32,\n    target_modules=[\"q_proj\", \"k_proj\", \"v_proj\", \"o_proj\", \"gate_proj\", \"up_proj\", \"down_proj\"],\n    lora_dropout=0.05,\n    bias=\"none\",\n    task_type=\"CAUSAL_LM\"\n)\nmodel = get_peft_model(model, peft_config)\n\n# 5. 載入資料集\ndataset = load_dataset(\"json\", data_files=dataset_path, split=\"train\")\n\n# 6. 配置訓練超參數\ntraining_args = TrainingArguments(\n    output_dir=\"./qwen_lora_output\",\n    per_device_train_batch_size=4,\n    gradient_accumulation_steps=4,\n    learning_rate=2e-4,\n    logging_steps=10,\n    num_train_epochs=3,\n    fp16=True,\n    optim=\"paged_adamw_8bit\",\n    save_strategy=\"epoch\",\n    report_to=\"none\"\n)\n\n# 7. 啟動 SFT 訓練器\ntrainer = SFTTrainer(\n    model=model,\n    train_dataset=dataset,\n    peft_config=peft_config,\n    max_seq_length=1024,\n    tokenizer=tokenizer,\n    args=training_args,\n    dataset_text_field=\"messages\"\n)\n\nprint(\"開始訓練模型...\")\ntrainer.train()\ntrainer.model.save_pretrained(\"lora_weights\")\nprint(\"訓練完成，LoRA 權重已儲存！\")",
+    "id": 97
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "四、 部署與串接：微調模型導入 Ollama",
+    "content": "訓練完成後的 LoRA 權重，可以與原始模型權重進行合併 (Merge)，並轉換為 Llama.cpp 支援的 GGUF 格式，直接放進 Ollama 中：\n1. 合併權重：使用 PEFT 庫的 `model.merge_and_unload()` 產生無損的 FP16 Safetensors 權重檔案。\n2. 轉換 GGUF：下載 `llama.cpp`，執行轉換指令：\n   `python3 convert_hf_to_gguf.py ./merged_model --outfile qwen_custom.gguf`\n3. 量化處理 (選用，減少顯存佔用)：\n   `./llama-quantize qwen_custom.gguf qwen_custom_q4_k_m.gguf Q4_K_M`\n4. 撰寫 Ollama Modelfile：建立一個名稱為 `Modelfile` 的純文字檔，寫入：\n   `FROM ./qwen_custom_q4_k_m.gguf`\n5. 導入 Ollama 引擎：\n   `ollama create my_custom_model -f Modelfile`\n6. 應用於專案中：最後，修改您的 `app.py`，將連接 Ollama 的 payload 中 `\"model\": \"qwen2.5\"` 修改為 `\"model\": \"my_custom_model\"`，即可在網頁端對話時調用您自建的微調模型！\n\nAquaRAG 系統：本地端 SQLite 資料庫建置與儲存技術說明書",
+    "id": 98
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "四、 部署與串接：微調模型導入 Ollama",
+    "content": "AquaRAG 系統：本地端 SQLite 資料庫建置與儲存技術說明書\n\n本文件專門針對 AquaRAG 系統中本地端 SQLite 資料庫（rag_database.db）的來源、結構設計、二進位向量儲存技術、記憶體載入優化以及生命週期管理進行深度的技術說明。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n一、 為什麼選擇本地端 SQLite？\n\n在構建 RAG（檢索增強生成）系統時，通常需要一個資料庫來存放非結構化文字與對應的向量嵌入（Embeddings）。AquaRAG 選擇了 SQLite 作為其向量與關係資料庫，基於以下技術考量：\n\n零配置與嵌入式架構 (Embedded Database)：\n\nSQLite 不需要像 MySQL、PostgreSQL 或專門的向量資料庫（如 Milvus、Qdrant）那樣安裝與維護獨立的伺服器進程。它是一個寫在 C 語言中的函式庫，資料庫就是一個單一的磁碟檔案（rag_database.db），極度適合本地端與輕量級系統部署。\n\n與 Python 完美整合：\n\nPython 標配內建 sqlite3 模組，不需要額外的驅動套件即可直接連線，消除了外部相依性故障的風險。\n\n混合查詢支援：\n\n系統除了用語意向量檢索外，也需要依據考試套數進行分類樹狀選單渲染。SQLite 同時具備高效的關係型 SQL 查詢功能與儲存二進位大型物件（BLOB）的能力。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 99
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 SQLite 資料庫表結構設計 (Schema Design)",
+    "content": "在資料庫中只有一張核心資料表，名為 questions。其結構設計如下：\n\n> CREATE TABLE IF NOT EXISTS questions (\n>     id INTEGER PRIMARY KEY,      -- 試題唯一識別碼 (1-indexed)\n>     exam_set TEXT,               -- 考試套數與年份名稱\n>     question_num TEXT,           -- 題號 (例如：第 1 題)\n>     question_title TEXT,         -- 試題標題/簡述\n>     original_question TEXT,      -- 原始考題內容 (以 Markdown 區塊呈現)\n>     full_content TEXT,           -- 專家詳解的完整內容 (包含 Markdown 表格與段落)\n>     embedding BLOB               -- 768 維 nomic-embed-text 向量之二進位數據\n> );\n\n\n欄位解析與儲存角色\n\n`full_content` (TEXT)：存放經過 parser.py 解析後的完整 Markdown 內容（包含提取出的表格）。當搜尋引擎找到最符合的題目時，此欄位的文字會被提取並作為上下文（Context）注入給 qwen2.5 語言模型。",
+    "id": 100
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 SQLite 資料庫表結構設計 (Schema Design)",
+    "content": "欄位解析與儲存角色\n\n`full_content` (TEXT)：存放經過 parser.py 解析後的完整 Markdown 內容（包含提取出的表格）。當搜尋引擎找到最符合的題目時，此欄位的文字會被提取並作為上下文（Context）注入給 qwen2.5 語言模型。\n\n`embedding` (BLOB)：BLOB 代表 Binary Large Object。由於 SQLite 原生不支援向量陣列，系統在此欄位中存放二進位編碼後的原始向量位元組（Bytes）。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 101
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "三、 資料庫的建立與填滿流程 (Pipeline & Population)",
+    "content": "rag_database.db 檔案並非預先存在，而是經由一套自動化的資料處理流水線建立：\n\n> flowchart LR\n>     Word[Word 專家解答.docx] -->|parser.py| JSON[parsed_questions.json]\n>     JSON -->|embedder.py| Ollama[Ollama Embed API]\n>     Ollama -->|取得 768維 float32| Bytes[轉換為 3072 Bytes 二進位]\n>     Bytes -->|SQL INSERT| SQLite[(rag_database.db)]\n\n\n詳細建置步驟：\n\n第一步：Word 解析\n\n執行 python3 parser.py，利用 python-docx 套件讀取 Word 文件。程式會辨識大綱與表格，將非結構化的考題轉換為結構化 JSON 清單並儲存至 parsed_questions.json。\n\n第二步：初始化 DB 檔案\n\n執行 python3 embedder.py。當程式調用 sqlite3.connect('rag_database.db') 時，若該檔案不存在，SQLite 引擎會在專案目錄下自動建立一個空的 rag_database.db 二進位檔案。\n\n第三步：特徵文字向量化\n\n對於 JSON 中每一筆考題，embedder.py 會拼接出包含考試資訊與詳解前段的特徵文字，然後呼叫本地 Ollama 的 nomic-embed-text 向量模型，取得一個由 768 個浮點數組成的數組。\n\n第四步：向量二進位序列化",
+    "id": 102
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "三、 資料庫的建立與填滿流程 (Pipeline & Population)",
+    "content": "第三步：特徵文字向量化\n\n對於 JSON 中每一筆考題，embedder.py 會拼接出包含考試資訊與詳解前段的特徵文字，然後呼叫本地 Ollama 的 nomic-embed-text 向量模型，取得一個由 768 個浮點數組成的數組。\n\n第四步：向量二進位序列化\n\n取得向量列表後，程式使用 NumPy 將其轉為單精度浮點數陣列，並呼叫 .tobytes() 方法轉換成 $3072$ 位元組 的原始二進位資料：\n\n> emb_arr = np.array(emb, dtype=np.float32)  # 768 個 float32\n>    emb_blob = emb_arr.tobytes()               # 768 * 4 bytes = 3072 bytes\n\n\n第五步：寫入資料庫\n\n最後透過 SQL 參數綁定，將所有元數據與二進位向量寫入 questions 資料表並執行提交（Commit）。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 103
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "四、 記憶體快取與向量解讀 (Memory Cache & Deserialization)",
+    "content": "在檢索階段，若每次搜尋都要從硬碟中將二進位 BLOB 讀出並還原，會對硬碟 I/O 造成極大負擔。為了解決這個瓶頸，search_engine.py 實作了記憶體快取優化：\n\n一次性讀取與還原：\n\n在系統啟動時，搜尋引擎的建構子會一次性讀取 questions 資料表中的所有資料：\n\n> cursor.execute(\"SELECT ..., embedding FROM questions\")\n>    rows = cursor.fetchall()\n\n\n反序列化 (Deserialization)：\n\n讀出二進位 BLOB 後，利用 NumPy 快速還原成單精度浮點數數組：\n\n> emb = np.frombuffer(emb_bytes, dtype=np.float32)\n\n\n矩陣化堆疊 (Matrix Stacking)：\n\n將還原後的向量堆疊成一個二維 NumPy 矩陣（大小為 $300 \\times 768$），常駐在記憶體中：\n\n> self.embeddings = np.vstack(emb_list)\n\n\n如此一來，在計算餘弦相似度時，便能直接以矩陣乘法（Dot Product）瞬間運算出與 300 題的相似分數，避開了磁碟存取限制。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 104
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "五、 資料庫的自動化生命週期管理",
+    "content": "為了確保系統重啟時資料庫的完整性，我們在 restart.sh 腳本中實作了自動化檢測：\n\n缺失自動建立：\n\n當執行 ./restart.sh 時，腳本會先以 [ ! -f \"rag_database.db\" ] 檢查檔案是否存在。若不存在，會自動提示並觸發 parser.py 與 embedder.py 重建資料庫。\n\n完整性校驗 (Integrity Check)：\n\n若檔案存在，腳本會調用一列 Python 語句去查詢資料庫內題目的計數：\n\n> DB_ROWS=$(python3 -c \"import sqlite3; conn = sqlite3.connect('rag_database.db'); print(conn.execute('SELECT COUNT(*) FROM questions').fetchone()[0])\" 2>/dev/null || echo \"0\")\n\n\n如果計數回傳為 0（代表空庫或損毀），腳本會主動發出警告，並重新執行建置流程。\n\n強制重建模式：\n\n當管理員執行 ./restart.sh --rebuild 時，腳本會清除現有的資料庫檔案並重新拉取 Ollama 的嵌入向量，以確保與原始 Word 文件內容完全同步。\n\n基於 SQL 資料庫之機器學習與時間序列建模技術指南\n\n本指南詳細說明如何使用 SQLite 關係型資料庫作為 RAG 與 IoT 系統的資料底座，並利用 Python（Pandas + Scikit-Learn + Statsmodels）直接從 SQL 資料表中載入數據進行機器學習分類模型與 ARIMA 時間序列趨勢預估模型的建模與訓練。",
+    "id": 105
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "五、 資料庫的自動化生命週期管理",
+    "content": "本指南詳細說明如何使用 SQLite 關係型資料庫作為 RAG 與 IoT 系統的資料底座，並利用 Python（Pandas + Scikit-Learn + Statsmodels）直接從 SQL 資料表中載入數據進行機器學習分類模型與 ARIMA 時間序列趨勢預估模型的建模與訓練。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 106
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "一、 智慧養殖資料庫設計：`sensor_logs`",
+    "content": "在真實的系統集成中，感測器上傳的讀數應記錄至 SQL 資料庫中，以實現持久化儲存與批次模型訓練。我們在資料庫中建立了以下資料表：\n\n> CREATE TABLE IF NOT EXISTS sensor_logs (\n>     id INTEGER PRIMARY KEY AUTOINCREMENT,\n>     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, -- 上傳時間戳記\n>     do_val REAL,         -- 溶氧量 (mg/L)\n>     temp_val REAL,       -- 溫度 (°C)\n>     ph_val REAL,         -- pH 值\n>     decision INTEGER     -- 當時執行的決策 (0: 關閉, 1: 打氣, 2: 全開)\n> );\n\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 107
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 自 SQL 讀取資料並訓練隨機森林分類器",
+    "content": "相較於硬編碼的靜態列表，我們可以使用 Pandas 的 read_sql_query 直接將 SQL 查詢結果轉換為 DataFrame，再提取為 NumPy 矩陣進行機器學習：\n\n2.1 實作代碼原理：[sql_model_pipeline.py](file:///Users/albert/Documents/RAG/sql_model_pipeline.py#L65-L84)",
+    "id": 108
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 自 SQL 讀取資料並訓練隨機森林分類器",
+    "content": "> import sqlite3\n> import pandas as pd\n> from sklearn.ensemble import RandomForestClassifier\n> \n> # 1. 建立資料庫連線\n> conn = sqlite3.connect(\"rag_database.db\")\n> \n> # 2. 以 SQL 載入特徵與標籤資料\n> sql_query = \"SELECT do_val, temp_val, ph_val, decision FROM sensor_logs\"\n> df = pd.read_sql_query(sql_query, conn)\n> \n> # 3. 提取為 Scikit-Learn 訓練矩陣\n> X = df[['do_val', 'temp_val', 'ph_val']].values\n> y = df['decision'].values\n> \n> # 4. 進行隨機森林擬合\n> rf = RandomForestClassifier(n_estimators=50, max_depth=4, random_state=42)\n> rf.fit(X, y)\n\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 109
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "三、 自 SQL 讀取時間序列數據進行 ARIMA 預測",
+    "content": "為了預估未來的溶氧趨勢，系統需要撈取最近的歷史時間序列（例如最近 24 小時的整點平均值），並將其時間戳記設定為 Pandas 的 DatetimeIndex 後，送入 ARIMA 模型：\n\n3.1 實作代碼原理：[sql_model_pipeline.py](file:///Users/albert/Documents/RAG/sql_model_pipeline.py#L90-L125)",
+    "id": 110
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "三、 自 SQL 讀取時間序列數據進行 ARIMA 預測",
+    "content": "> from statsmodels.tsa.arima.model import ARIMA\n> \n> # 1. 自 SQL 撈取最近 24 筆監測記錄 (依時間降序撈取，再反轉為升序)\n> sql_query = \"\"\"\n> SELECT timestamp, do_val \n> FROM sensor_logs \n> ORDER BY timestamp DESC \n> LIMIT 24\n> \"\"\"\n> df_ts = pd.read_sql_query(sql_query, conn)\n> df_ts = df_ts.iloc[::-1].reset_index(drop=True)\n> \n> # 2. 將時間戳記設為 DatetimeIndex\n> df_ts['timestamp'] = pd.to_datetime(df_ts['timestamp'])\n> df_ts.set_index('timestamp', inplace=True)\n> \n> # 3. 訓練並擬合 ARIMA(1, 1, 1) 模型\n> series = df_ts['do_val']\n> model = ARIMA(series, order=(1, 1, 1))\n> result = model.fit()\n> \n> # 4. 預測未來 3 個時間點\n> forecast = result.forecast(steps=3)\n\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 111
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "四、 完整管道流 (End-to-End Pipeline) 運作成效",
+    "content": "當執行自動化執行腳本 run_advanced_models.sh 時，管道自動執行以下操作：\n\n日誌寫入：將 200 筆模擬的連續數據寫入 SQLite。\n\nSQL 分類建模：自 sensor_logs 中動態讀取 200 筆特徵，順利完成隨機森林模型訓練。\n\nSQL 時間序列預測：自資料庫撈取最後 24 筆記錄，成功擬合 ARIMA 並給出未來 3 個步長的溶氧預估。這是一個標準的資料驅動決策系統。\n\nAquaRAG 系統程式原始碼與技術說明手冊\n\n本文件針對 AquaRAG 系統中的所有核心程式進行深度技術解析，詳細說明各模組之功能職責、軟體依賴、關鍵函式設計與資料流向。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n一、 文件結構化解析程式：[parser.py](file:///Users/albert/Documents/RAG/parser.py)",
+    "id": 112
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "1. 程式概述",
+    "content": "parser.py 的核心任務是將原始非結構化之 Microsoft Word 格式的歷屆試題與詳解（魚類生理學歷屆試題專家解答.docx）轉換為結構化的 JSON 資料檔案（parsed_questions.json）。該程式能有效處理段落切割、考卷邊界辨識與將 Word 表格自動轉譯為大語言模型易讀的 Markdown 表格。",
+    "id": 113
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "2. 套件依賴",
+    "content": "docx (python-docx)：讀取並遍歷 Word 文件的段落與表格 XML 節點。\n\njson：將結構化結果序列化輸出。\n\nre：以正規表達式進行題號與考卷的特徵匹配。\n\nos：進行檔案存在性檢查。",
+    "id": 114
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "3. 關鍵函式與設計細節",
+    "content": "`iter_block_items(parent)`：\n\n目的：遍歷 Word 元素並維持其在文件中的原始物理順序。\n\n原理：直接走訪 parent 節點的子節點。若子節點標記結尾為 p，則封裝為 Paragraph 物件；若標記結尾為 tbl，則封裝為 Table 物件。\n\n`table_to_markdown(table)`：\n\n目的：將 Word 內複雜的表格轉換為標準 Markdown 格式。\n\n原理：遍歷表格的每一行，將每個儲存格的文字以 | 連接。特殊設計針對 1x1 表格（常見的「原題重現」區塊），會轉換成 Markdown 的引言引號 >。\n\n`parse_docx(file_path)`：\n\n目的：主解析邏輯。\n\n流程：\n\n載入 Word 文件。\n\n使用正規表達式匹配考試套數（如「第 1 套試題」）與題號（如「第 1 題」）。\n\n遇到新的題號時，將前一題的字典存入列表，並動態開啟一個新問題字典。\n\n將其後的段落與表格全部加入該問題的 content_elements 列表中，最後以雙換行符 \\n\\n 拼接為 full_content。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n二、 語意向量化嵌入程式：[embedder.py](file:///Users/albert/Documents/RAG/embedder.py)",
+    "id": 115
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "1. 程式概述",
+    "content": "embedder.py 負責將解析好的 JSON 文字區塊轉換為 768 維的密集向量，並建立 SQLite 關係型向量資料庫（rag_database.db）進行持久化儲存。",
+    "id": 116
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "2. 套件依賴",
+    "content": "sqlite3：與本地 SQLite 資料庫建立連線並執行 SQL 語句。\n\nnumpy (np)：處理向量浮點數陣列的維度配置與二進位序列化。\n\nrequests：向 Ollama 本地 API 傳送 HTTP POST 請求。\n\njson / os / sys：處理檔案讀寫與系統結束流程。",
+    "id": 117
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "3. 關鍵函式與設計細節",
+    "content": "`get_embedding(text, model)`：\n\n原理：發送 JSON 負載至 http://localhost:11434/api/embeddings。如果成功，回傳一個長度為 768 的實數列表；失敗則補捉異常並印出警告。\n\n`init_db(db_path)`：\n\n原理：建立 SQLite 連線，並初始化名為 questions 的資料表，其中欄位包含關係資料（如 exam_set、question_title 等）以及儲存向量的 embedding 欄位（儲存屬性為 BLOB，即 Binary Large Object）。\n\n`main()`：\n\n語意特徵拼接：為了達到精準檢索，程式將「考試套數、題號、題目、原題重現、專家解析前 1000 個字」串聯為特徵文本（Feature Text）再送去計算嵌入。\n\n向量序列化：收到 768 維的列表後，呼叫 np.array(emb, dtype=np.float32).tobytes() 將其壓縮為 $3072$ 位元組的二進位字串。\n\n批次提交優化：程式每處理 10 筆資料即執行 conn.commit() 提交，減少資料庫鎖定時間。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n三、 檢索引擎核心模組：[search_engine.py](file:///Users/albert/Documents/RAG/search_engine.py)",
+    "id": 118
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "1. 程式概述",
+    "content": "search_engine.py 封裝了 SearchEngine 類別，在記憶體中快取所有試題的嵌入向量，並提供基於餘弦相似度的語意檢索功能，以及服務離線時的關鍵字備援降級機制。",
+    "id": 119
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "2. 套件依賴",
+    "content": "sqlite3：載入儲存的試題資料。\n\nnumpy：用於在記憶體中進行高效的矩陣點積與模長運算。\n\nrequests / os：發送查詢語句向量化請求。",
+    "id": 120
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "3. 關鍵函式與設計細節",
+    "content": "`load_database()`：\n\n快取優化：在類別初始化時執行。將資料表中的二進位 BLOB 向量還原為 NumPy float32 陣列，並呼叫 np.vstack 將所有考題堆疊成一個形狀為 (300, 768) 的 2D 矩陣。這樣在檢索時不需再查詢資料庫。\n\n`get_query_embedding(query)`：\n\n原理：將使用者的提問發送給 Ollama，取得查詢向量。\n\n`search(query, top_k)`：\n\n餘弦相似度矩陣化運算：\n\n透過 NumPy 進行一步到位的矩陣乘法，同時計算查詢向量與所有 300 筆資料的夾角餘弦值：\n\n> dot_product = np.dot(self.embeddings, query_emb)\n>     norm_a = np.linalg.norm(self.embeddings, axis=1)\n>     norm_b = np.linalg.norm(query_emb)\n>     similarities = dot_product / (norm_a * norm_b + 1e-8)\n\n\n再利用 np.argsort 取出分數最高的前 $K$ 筆資料。\n\n`keyword_search(query, top_k)`：\n\n降級機制：當 Ollama 連線失敗或無法獲取嵌入向量時，此函式會自動被調用。它會將提問拆分並在題目與內文中比對出現頻率（題目權重 5.0，內文 1.0），最後回傳排序結果，確保服務不中斷。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 121
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "3. 關鍵函式與設計細節",
+    "content": "降級機制：當 Ollama 連線失敗或無法獲取嵌入向量時，此函式會自動被調用。它會將提問拆分並在題目與內文中比對出現頻率（題目權重 5.0，內文 1.0），最後回傳排序結果，確保服務不中斷。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n四、 後端伺服器程式：[app.py](file:///Users/albert/Documents/RAG/app.py)",
+    "id": 122
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "1. 程式概述",
+    "content": "app.py 是基於 FastAPI 框架開發的 Web 與 API 伺服器。它負責提供考題列表、數據統計、靜態網頁掛載，以及最核心的 /api/chat 端點，以 SSE 串流協議將 RAG 生成的回答實時推送到前端。",
+    "id": 123
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "2. 套件依賴",
+    "content": "fastapi：構建高效能、支援異步的 API 路由。\n\nuvicorn：ASGI 伺服器，執行 FastAPI 應用。\n\nrequests：以 Stream 方式呼叫 Ollama 的語言模型 API。\n\nsqlite3 / os / json：基礎輔助與統計。",
+    "id": 124
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "3. 關鍵端點與異步設計",
+    "content": "`/api/stats` 與 `/api/exam-sets`：\n\n原理：從 SQLite 資料庫中統計資料大小、考卷總數，並建立樹狀考題大綱，供前端瀏覽器側邊欄載入。\n\n`sse_chat_generator(message, history)`：\n\n上下文提取：首先調用 SearchEngine.search() 取得相似度最高的前 4 筆考題解答。\n\n首發引用資訊 (Citations Event)：生成器會立即回傳第一個 SSE 事件，帶有被引用考題的 ID 與標題，以便前端立即渲染引用標籤。\n\nPrompt 工程與大模型呼叫：將 Top-4 考題當作 Context，配合對話歷史紀錄，發送 POST 請求至本地 Ollama 的 /api/chat 端點，並設定 \"stream\": True。\n\n串流推送：使用 response.iter_lines() 逐行讀取 Ollama 的輸出，包裝為 event: text 事件推送至瀏覽器。\n\n`/api/chat`：\n\n原理：接受聊天請求，包裝 sse_chat_generator 成 StreamingResponse(..., media_type=\"text/event-stream\") 回傳前端。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n五、 系統重新啟動管理工具：[restart.sh](file:///Users/albert/Documents/RAG/restart.sh)",
+    "id": 125
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "1. 程式概述",
+    "content": "restart.sh 是一個基於 Bash 撰寫的系統監控與重啟維護指令檔。它實現了進程生命週期管理、自動化環境健全檢查、模型自動下載、資料庫自動建置與主動健康檢查。",
+    "id": 126
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "2. 技術規格與核心流程",
+    "content": "停止現有服務：\n\n透過指令 lsof -t -i :8000 偵測佔用連接埠 8000 的所有進程 PID。\n\n發送 kill 信號，若 1.5 秒後進程依然存在，則強制執行 kill -9 確保埠釋放。\n\n依賴環境檢查：\n\n驗證 Python3 與必要模組是否可正常載入。\n\n透過 /api/tags 檢查 Ollama 連線狀態。若本機缺少 nomic-embed-text 或 qwen2.5 模型，會主動調用 ollama pull 將其補齊。\n\n資料庫驗證：\n\n檢查 rag_database.db 是否存在且非空。\n\n若使用者輸入了 --rebuild 參數，或檢測到資料庫已損毀，則按順序執行 python3 parser.py 與 python3 embedder.py 重建索引。\n\n服務守護與健康檢查：\n\n使用 nohup python3 app.py > app.log 2>&1 & 將服務置於背景運行，防止終端機關閉後服務中斷。\n\n進入 15 次迴圈，每秒使用 curl 測試 http://localhost:8000/api/stats 的 HTTP 狀態碼。\n\n狀態碼為 200 代表重啟成功，並列印美化的成果終端介面；若 15 秒內無回應，則列印 app.log 的最後 20 行日誌供管理員排查。\n\n一般電腦適用之輕量級機器學習模型與應用建議\n\n本報告針對一般家用或辦公用電腦（僅具備標準 CPU、無高階獨立 GPU）的硬體限制，評估並推薦適合在本地端運行的輕量級機器學習模型，以及它們在智慧養殖與數據感測中的具體應用場景。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 127
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "一、 推薦之輕量級機器學習模型",
+    "content": "在一般電腦上，我們應優先選擇「非深度學習（Non-Deep Learning）」的傳統機器學習演算法。這些演算法運算開銷極低，使用 CPU 在毫秒級內即可完成訓練與預測。",
+    "id": 128
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "1. 隨機森林 (Random Forest)",
+    "content": "原理：由數十到數百棵決定樹所組成的集成學習模型。單一決定樹容易發生過度擬合且不穩定，隨機森林透過投票或平均值來整合預測，大幅提高穩定性。\n\n電腦運作表現：極為輕量。在一般 CPU 上訓練 1000 筆數據僅需約 0.05 秒。\n\n養殖應用：高精度的多設備聯合控制（例如同時評估餵食量、水車與抽水閥狀態）。",
+    "id": 129
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "2. 線性與多項式回歸 (Linear / Polynomial Regression)",
+    "content": "原理：尋找特徵與預測目標之間的最佳擬合直線或曲線（如 $y = ax + b$）。\n\n電腦運作表現：運算成本幾乎為零，只需進行簡單的矩陣解析運算。\n\n養殖應用：\n\n感測器校正 (Calibration)：將 ESP32 傳回的類比電壓值（Voltage）精準校正轉換為實際的 pH 值或溶氧量數值。\n\n溶氧衰退預估：預測未來數小時內溶氧量的線性下降斜率。",
+    "id": 130
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "3. 支持向量機 (SVM / SVR)",
+    "content": "原理：在高維度空間中尋找一個最佳超平面，將不同類別進行最大化間隔劃分。\n\n電腦運作表現：對於萬筆以下的中小型資料集，運算速度極快，記憶體佔用極小。\n\n養殖應用：水質健康狀態分類（如將水質精準分類為：優良、普通、惡化）。",
+    "id": 131
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "4. 輕量級梯度提升樹 (LightGBM)",
+    "content": "原理：基於直方圖的決策樹梯度提升演算法，由微軟開發，專為速度快、佔用記憶體小而設計。\n\n電腦運作表現：速度遠快於傳統 XGBoost，通常在一秒內即可完成大規模數據的疊代訓練。\n\n養殖應用：水溫與溶氧的短期預測（結合氣象預報資料）。",
+    "id": 132
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "5. 時間序列自回歸模型 (ARIMA / 指數平滑)",
+    "content": "原理：傳統數理統計模型，利用時間序列的滯後項（Lag）與移動平均來預測未來的趨勢。\n\n電腦運作表現：無須任何神經網路，僅憑 CPU 的統計學疊代即可在毫秒內完成。\n\n養殖應用：缺氧提早預警（最實用）。若預測 3 小時後（例如凌晨 3:00）溶氧將跌破危急值，系統可提前啟動水車，避免魚群浮頭。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 133
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 輕量級模型之應用場景與建置成本對照",
+    "content": "| 模型名稱 | 主要應用場景 | 運算時間 (CPU) | 記憶體消耗 | 可否直接移植至 ESP32 |\n\n| :--- | :--- | :---: | :---: | :---: |\n\n| 線性回歸 | 感測器電壓校正、簡單趨勢線 | < 1 毫秒 | < 1 KB | 可以 (極簡公式) |\n\n| 單一決定樹 | 設備自動控制閘門 (If-Else) | < 1 毫秒 | < 5 KB | 可以 (巢狀判斷) |\n\n| 隨機森林 | 多因子綜合評估、水質風險預警 | ~ 10 毫秒 | ~ 5 MB | 困難 (結構過於龐大) |\n\n| LightGBM | 結合氣象局資料預測明日水溫 | ~ 50 毫秒 | ~ 10 MB | 否 (需在電腦端執行) |\n\n| ARIMA | 預測清晨幾點會缺氧 (時間序列) | ~ 20 毫秒 | ~ 2 MB | 否 (需在電腦端執行) |\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n三、 開發建議：如何選擇？\n\n對於智慧養殖與感測器應用，我們建議在一般電腦上採用以下「雙層混合決策架構」：\n\n邊緣端 (ESP32)：\n\n執行最簡單的 線性擬合公式（用來校正感測器讀數）與 單一決定樹（執行即時的緊急關閉/開啟繼電器操作）。\n\n控制中心 (一般電腦/伺服器)：\n\n運行 ARIMA（時間序列） 或 隨機森林。電腦定時讀取資料庫中的歷史感測紀錄，預測未來的溶氧趨勢。若預測有缺氧風險，則向 ESP32 發送「預先啟動設備」的指令。這能兼顧邊緣運算的即時性與電腦端複雜模型的精準預測力。",
+    "id": 134
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 輕量級模型之應用場景與建置成本對照",
+    "content": "控制中心 (一般電腦/伺服器)：\n\n運行 ARIMA（時間序列） 或 隨機森林。電腦定時讀取資料庫中的歷史感測紀錄，預測未來的溶氧趨勢。若預測有缺氧風險，則向 ESP32 發送「預先啟動設備」的指令。這能兼顧邊緣運算的即時性與電腦端複雜模型的精準預測力。\n\nQwen-2.5 與 RAG 系統：反應速度與答題準確度進階優化方案\n\n為了讓 AquaRAG 系統在企業級或高階學術應用中表現更優異，我們針對「反應速度（推理效能）」與「回答準確度（檢索生成品質）」整理了業界最前沿的進階優化方案。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 135
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "一、 反應速度進階優化 (Speed Acceleration)",
+    "content": "在本地端部署大語言模型時，除了採用模型量化（如 4-bit）之外，還可以通過以下進階技術進一步壓低延遲、提高吞吐量：",
+    "id": 136
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "1.1 部署高吞吐推論引擎：vLLM",
+    "content": "技術原理：vLLM 是目前最快的 LLM 推理引擎，其核心是 PagedAttention（分頁注意力） 演算法。傳統推理中，模型會為每個 Request 預先分配一塊連續的 KV Cache 顯存空間，這會導致高達 60% 的記憶體碎片浪費。PagedAttention 將 KV Cache 拆分為非連續的記憶體分頁，大幅降低顯存開銷。\n\n優勢：在相同硬體下，推理吞吐量可提升 10 到 30 倍，且支援高併發（多個使用者同時提問而不卡頓）。",
+    "id": 137
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "1.2 投機解碼 (Speculative Decoding)",
+    "content": "技術原理：使用一個引導模型（Draft Model，如極小型的 Qwen2.5-0.5B）快速、廉價地預測多個 Token，然後將這些預測結果一次性丟給主模型（Target Model，如 Qwen2.5-7B）進行並行驗證（驗證只需 1 次 forward pass）。\n\n優勢：在完全不損失 Qwen2.5-7B 生成精度與品質的前提下，生成速度可提升 1.5 到 2.5 倍。",
+    "id": 138
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "1.3 KV Cache 量化 (INT8/INT4)",
+    "content": "技術原理：將推理過程中產生的歷史 Context 緩存（KV Cache）也進行 8-bit 或 4-bit 的量化壓縮，而不是使用預設的 FP16。\n\n優勢：在處理超長對話時，可節省高達 50% 以上的顯存帶寬消耗，防止生成後半段字詞時速度急劇下跌。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 139
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 答題準確度進階優化 (Accuracy Enhancement)",
+    "content": "單純依靠向量相似度檢索（Dense Retrieval）容易因為語意漂移或專有名詞缺失而找不到最精確的內容。以下是提高檢索準確度的前沿技術：",
+    "id": 140
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "2.1 混合檢索 (Hybrid Search)",
+    "content": "技術原理：將語意向量檢索與傳統的稀疏向量檢索（如 BM25 關鍵字匹配）結合。\n\n機制：\n\n向量檢索負責「大範圍語意理解」（如：滲透壓調節的原理）。\n\nBM25 負責「精準專有名詞與編號匹配」（如：民國 112 年、高考三級、第 3 題）。\n\n最終使用 RRF (Reciprocal Rank Fusion, 互惠排名融合) 演算法將兩者的結果合併加權。\n\n優勢：大幅提高首選答案包含精確資訊的機率。",
+    "id": 141
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "2.2 重排模型技術 (Re-ranking)",
+    "content": "這是目前提升 RAG 準確度最立竿見影的方法：\n\n> graph LR\n>     Query[提問] -->|快速初篩| Vector[向量檢索 Top-20]\n>     Vector -->|重排計算| Reranker[Re-ranker 交叉編碼器]\n>     Reranker -->|深度比對| Top4[精準 Top-4]\n>     Top4 -->|當作 Context| LLM(Qwen-2.5)\n\n\n技術原理：初篩階段用向量檢索快速拉出 20 筆候選題目；隨後使用雙向注意力機制（Joint Attention）的重排模型（如 bge-reranker-large）對這 20 筆資料進行深度的「問題 - 答案對」交叉比對，重新計算得分。\n\n優勢：重排模型比單純的餘弦相似度更能捕捉微小的邏輯對照關係，檢索準確度 (NDCG@5) 通常可提升 15% 以上。",
+    "id": 142
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "2.3 父子區塊檢索 (Parent-Child Chunking)",
+    "content": "技術原理：將原始詳解切成兩個層級：\n\n子區塊 (Child Chunks)：較小（如 100 字），用於保證向量檢索時不會稀釋細節特徵。\n\n父區塊 (Parent Chunks)：較大（如 1000 字，包含前後文脈絡）。\n\n檢索機制：系統以「子區塊」去進行相似度比對，一旦選中，就自動取出對應的整個「父區塊（完整大脈絡）」送給 Qwen-2.5 閱讀。\n\n優勢：避免模型因為只拿到斷章取義的碎片而無法給出完整答題邏輯。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 143
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "三、 進階優化方案比較表",
+    "content": "| 優化方向 | 實施技術 | 速度提升 | 準確度提升 | 硬體需求門檻 | 適用情境 |\n\n| :--- | :--- | :---: | :---: | :---: | :--- |\n\n| 反應速度 | vLLM 引擎 | ★★★★★ | ─ | 中等 (需要支援 CUDA / ROCm) | 多人使用、高吞吐需求 |\n\n| 反應速度 | 投機解碼 | ★★★★☆ | ─ | 低 (多開一個小模型) | 減少單人提問等待時間 |\n\n| 答題準確度 | Re-ranking | ─ | ★★★★★ | 中等 (需載入幾百MB的重排模型) | 考題含有精細的生理化學機制 |\n\n| 答題準確度 | 混合檢索 (RRF)| ─ | ★★★★☆ | 極低 (僅需 CPU 計算) | 經常需要搜尋年份、特定代號與題號 |\n\n| 答題準確度 | 父子區塊檢索 | ─ | ★★★★☆ | 無 (資料庫層級優化) | 考卷大題中包含多個子小題的結構 |\n\nAquaRAG 系統啟動與故障排除指南\n\n文件類型：技術維護文檔  |  建立時間：2026年6月9日\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 144
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "一、 問題描述 (Problem Description)",
+    "content": "使用者在啟動 AquaRAG 系統的網頁端時，點擊進入「歷屆試題瀏覽器」頁面，左側的試題大綱選單載入失敗，並在篩選框下方顯示「載入失敗」警示圖示與文字，導致使用者無法瀏覽歷屆試題清單。",
+    "id": 145
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 故障原因分析 (Root Cause Analysis)",
+    "content": "經排查系統程序狀態，該錯誤的核心原因如下：\n\n後端 API 服務未啟動：系統的後端主程式 app.py (基於 FastAPI/Uvicorn 框架) 在使用者存取網頁時未在背景執行。\n\n前端請求中斷 (Connection Refused)：網頁端載入時會呼叫 API `/api/exam-sets` 來獲取考題清單。由於連接埠 8000 沒有任何程序監聽，導致 Fetch 請求遭拒絕，觸發前端 Javascript 的例外捕獲 (catch block)，最終在畫面上顯示「載入失敗」。\n\n環境狀態完整度：經核對，底層 SQLite 資料庫檔 `rag_database.db` 結構與 300 筆資料均完整無損，Ollama 服務亦正常運作，故單純僅是 app.py 服務未執行所致。",
+    "id": 146
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "三、 解決與處理步驟 (Resolution Steps)",
+    "content": "第一步：核對資料庫檔案\n確保本機工作目錄下存在 `rag_database.db` 且大小正常。可使用以下 Python 指令測試資料庫連接與資料列數：\n指令：`python3 -c \"import sqlite3; conn = sqlite3.connect('rag_database.db'); print(conn.execute('SELECT COUNT(*) FROM questions').fetchone())\"`\n(預期輸出應為 `(300,)`)。\n\n第二步：確認 Ollama 向量模型服務\n本系統之語意搜尋與對話強烈依賴 Ollama 的 `nomic-embed-text` 與 `qwen2.5` 模型。請確保 Ollama 已啟動，可於終端機執行 `curl http://localhost:11434` 測試回應。\n\n第三步：啟動後端伺服器 (核心修正)\n在專案根目錄下，開啟終端機並執行以下指令來啟動 FastAPI 服務：\n指令：`python3 app.py`\n啟動成功後，終端機應顯示 `Uvicorn running on http://0.0.0.0:8000` 且搜尋引擎成功載入 300 題向量資料。\n\n第四步：重新整理網頁\n開啟瀏覽器並造訪 `http://localhost:8000/`，或直接重新整理已開啟的網頁。此時試題瀏覽器應可成功發送請求並載入左側的試題樹狀圖選單。",
+    "id": 147
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "四、 系統常用維護指令 (Commands Reference)",
+    "content": "| 操作項目 | 執行指令 | 備註說明 |\n| --- | --- | --- |\n| 啟動後端服務 | python3 app.py | 啟動 Web 與 API 伺服器，預設監聽埠 8000 |\n| 檢查連接埠佔用 | lsof -i :8000 | 確認 8000 埠是否已被正確監聽或遭佔用 |\n| 檢查 Ollama 狀態 | curl http://localhost:11434/ | 檢查本地大模型推理引擎的運作狀態 |\n| 驗證資料庫資料 | python3 -c \"...\" | 執行簡易 SQL 測試資料庫檔案是否損毀 |\n\n\n【目前系統狀態：服務已成功啟動並正常連線】\n\nESP32 智慧養殖感測整合與平衡決定樹模型建置指南\n\n本指南詳細說明如何使用 ESP32 收集池塘水質參數（溶氧量 DO、溫度 Temp、pH 值），並利用「平衡決定樹（Balanced Decision Tree / CART）」演算法建立一個輕量級邊緣運算決策模型，自動控制水車與打氣機等水產養殖設備。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 148
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "一、 智慧養殖系統架構",
+    "content": "本系統採用 邊緣運算（Edge Computing） 與 雲端同步（Cloud Sync） 的雙軌架構：\n\n> graph TD\n>     A[水質感測器 DO / Temp / pH] -->|類比/數位訊號| B(ESP32 微處理器)\n>     B -->|執行本地決定樹| C{本地決策}\n>     C -->|GPIO 控制繼電器| D[水車電源 ON/OFF]\n>     C -->|GPIO 控制繼電器| E[打氣設備 ON/OFF]\n>     B -->|Wi-Fi HTTP POST| F[FastAPI 後端 API /api/sensor-data]\n>     F -->|儲存記錄| G[(SQLite 資料庫)]\n>     F -->|雲端決策回傳| B\n\n\nESP32 角色：負責硬體感測器讀取，並內嵌輕量化的決定樹決策程式碼（Nested If-Else），即便在斷網狀態下，依然能做出正確的設備控制。\n\nPython 後端角色：接收 ESP32 上傳的歷史數據，用於報表統計，並可透過機器學習演算法定期「重新訓練並優化」決定樹參數。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 149
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 平衡決定樹演算法 (CART) 原理",
+    "content": "為避免在硬體運算資源受限的 ESP32 上執行複雜的浮點數矩陣計算，本系統使用 分類與回歸樹 (CART) 演算法來建立「平衡決策樹」。",
+    "id": 150
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "2.1 吉尼不純度 (Gini Impurity)",
+    "content": "決策樹分支的依據是尋找能讓資料集「最純」的分切點。資料集 $D$ 的吉尼不純度定義為：\n\nI_G(D) = 1 - \\sum_{i=1}^{C} p_i^2\n\n其中 $p_i$ 是類別 $i$ 在子集中出現的機率。$I_G(D)$ 越接近 $0$ 代表該節點的類別越純。",
+    "id": 151
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "2.2 尋找最佳分割點",
+    "content": "我們遍歷所有特徵（DO、Temp、pH）與分切閾值（Threshold），尋找分割後能獲得最大「資訊增益（Information Gain）」的組合：\n\n\\Delta I_G = I_G(D) - \\left( \\frac{|D_{\\text{left}}|}{|D|} I_G(D_{\\text{left}}) + \\frac{|D_{\\text{right}}|}{|D|} I_G(D_{\\text{right}}) \\right)",
+    "id": 152
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "2.3 平衡性控制 (Max Depth Limit)",
+    "content": "為了使模型保持「平衡」且不發生過度擬合（Overfitting），我們限制樹的最大深度 `max_depth=3`。這樣產生的樹狀結構會非常對稱與平衡，且轉換成代碼時，最多只需要進行 3 次 if-else 判斷即可得出最終決策，極大節省了 ESP32 的運算時間。\n\nAquaRAG 智慧養殖：決定樹訓練資料集範例與場景對照表\n\n本文件提供智慧養殖決策模型（do_val 溶氧量、temp_val 溫度、ph_val 酸鹼值）的訓練資料樣本範例，並結合實際養殖現場之生態場景進行技術解讀。\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 153
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "一、 決策控制標籤定義 (Target Labels)",
+    "content": "模型輸出的決策動作（Action）對應硬體繼電器狀態如下：\n\n| 類別標籤 (Label) | 控制動作 (Action) | 繼電器 1 (水車) | 繼電器 2 (打氣機) | 養殖水質狀態 |\n\n| :---: | :--- | :---: | :---: | :--- |\n\n| `0` | 正常運作 (無動作) | 關閉 (LOW) | 關閉 (LOW) | 溶氧充足，水質指標正常 |\n\n| `1` | 啟動打氣設備 (警告) | 關閉 (LOW) | 啟用 (HIGH) | 溶氧量偏低或高溫缺氧預警 |\n\n| `2` | 啟動水車與打氣 (危急) | 啟用 (HIGH) | 啟用 (HIGH) | 嚴重缺氧，魚隻有浮頭或集體死亡危險 |\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 154
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 訓練資料範例列表 (15 筆典型樣本)",
+    "content": "以下表格列出決定樹訓練時輸入的特徵矩陣（Features）與對應標籤（Labels），並標註其實際生態物理意義：\n\n| 樣本編號 | 溶氧量 DO (mg/L) | 水溫 Temp (°C) | 酸鹼值 pH | 決策標籤 (Label) | 養殖池生態場景描述 (Scenarios) |\n\n| :---: | :---: | :---: | :---: | :---: | :--- |\n\n| 1 | 6.80 | 25.5 | 7.8 | `0` | 晴天下午：光合作用強烈，溶氧與 pH 均處於最舒適狀態。 |\n\n| 2 | 5.50 | 22.0 | 7.4 | `0` | 秋季白天：水溫適中，溶氧充足，無須啟動任何機械。 |\n\n| 3 | 7.20 | 28.0 | 8.2 | `0` | 夏季中午：藻類活動旺盛，光合作用釋放大量氧氣，pH 稍偏高但安全。 |\n\n| 4 | 4.50 | 24.0 | 7.2 | `1` | 陰天傍晚：光合作用弱，溶氧降至臨界值（<4.8），啟動打氣增氧。 |\n\n| 5 | 5.00 | 31.5 | 7.9 | `1` | 夏季午後高溫預警：水溫高於 30°C，氣體溶解度降低，提早開啟打氣機防止缺氧。 |\n\n| 6 | 4.10 | 32.0 | 7.6 | `1` | 酷暑夜間初期：水溫極高且溶氧已開始滑落，啟動打氣機加強水流對流。 |\n\n| 7 | 3.50 | 20.0 | 7.0 | `1` | 冬季低溫清晨：無光合作用，溶氧下降至警告區間，開啟打氣機。 |",
+    "id": 155
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 訓練資料範例列表 (15 筆典型樣本)",
+    "content": "| 6 | 4.10 | 32.0 | 7.6 | `1` | 酷暑夜間初期：水溫極高且溶氧已開始滑落，啟動打氣機加強水流對流。 |\n\n| 7 | 3.50 | 20.0 | 7.0 | `1` | 冬季低溫清晨：無光合作用，溶氧下降至警告區間，開啟打氣機。 |\n\n| 8 | 2.80 | 26.0 | 7.1 | `2` | 夏秋清晨危急狀態：溶氧跌破 3.2，魚群開始浮頭，水車與打氣全開以強制增氧。 |\n\n| 9 | 1.80 | 29.5 | 6.8 | `2` | 暴雨後倒藻：有機物大量分解消耗氧氣，溶氧處於危急缺氧狀態，必須全開急救。 |\n\n| 10 | 2.10 | 33.0 | 7.5 | `2` | 熱帶高溫暴雨夜：極端悶熱且雷雨使水質分層，下層缺氧，全開水車打破熱分層。 |\n\n| 11 | 5.10 | 23.5 | 7.5 | `0` | 春季正常狀態：溫和的氣候，水質生態平衡。 |\n\n| 12 | 3.00 | 18.5 | 6.9 | `2` | 寒流夜間缺氧：低溫下依然出現缺氧，開啟全部設備提供循環。 |\n\n| 13 | 4.90 | 30.5 | 7.7 | `1` | 高溫無風帶：溫度高於 30°C 且溶氧未達安全值 5.2，啟動打氣維持基本對流。 |\n\n| 14 | 6.10 | 19.0 | 7.3 | `0` | 冬季正常下午：低水溫有利於氣體溶解，指標優良。 |\n\n| 15 | 3.10 | 27.0 | 7.0 | `2` | 清晨日出前：溶氧降到 3.1 危急點，水車與打氣機全開避免魚隻浮頭窒息。 |",
+    "id": 156
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "二、 訓練資料範例列表 (15 筆典型樣本)",
+    "content": "| 14 | 6.10 | 19.0 | 7.3 | `0` | 冬季正常下午：低水溫有利於氣體溶解，指標優良。 |\n\n| 15 | 3.10 | 27.0 | 7.0 | `2` | 清晨日出前：溶氧降到 3.1 危急點，水車與打氣機全開避免魚隻浮頭窒息。 |\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 157
+  },
+  {
+    "source_file": "AquaRAG 智慧養殖與 RAG 系統學習手冊.docx",
+    "chunk_title": "三、 CSV 格式訓練資料集樣貌 (可用於直接匯入或儲存)",
+    "content": "以下為符合上述邏輯之標準逗號分隔值（CSV）數據範例，您可以直接複製並存為 aquaculture_dataset.csv：\n\n> do_val,temp_val,ph_val,action_label\n> 6.80,25.5,7.8,0\n> 5.50,22.0,7.4,0\n> 7.20,28.0,8.2,0\n> 4.50,24.0,7.2,1\n> 5.00,31.5,7.9,1\n> 4.10,32.0,7.6,1\n> 3.50,20.0,7.0,1\n> 2.80,26.0,7.1,2\n> 1.80,29.5,6.8,2\n> 2.10,33.0,7.5,2\n> 5.10,23.5,7.5,0\n> 3.00,18.5,6.9,2\n> 4.90,30.5,7.7,1\n> 6.10,19.0,7.3,0\n> 3.10,27.0,7.0,2\n",
+    "id": 158
+  },
+  {
+    "source_file": "AquaRAG_系統架構與RAG模型建置指南.docx",
+    "chunk_title": "前言",
+    "content": "AquaRAG 向量檢索與生成 (RAG) 系統建置指南\n\n基於大模型與向量資料庫的「魚類生理學」國考解答檢索系統\n\n技術白皮書  |  編製：Antigravity  |  時間：2026年6月9日\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 159
+  },
+  {
+    "source_file": "AquaRAG_系統架構與RAG模型建置指南.docx",
+    "chunk_title": "一、 系統架構簡介 (System Overview)",
+    "content": "AquaRAG 是一套專為國家考試「魚類生理學」科目設計的「檢索增強生成」(Retrieval-Augmented Generation, RAG) 系統。 RAG 技術透過將外部專業知識庫（如歷屆考題與專家詳解）切碎並進行向量化儲存，當使用者輸入提問時，系統會即時檢索最相關的內容作為上下文 (Context)， 並提供給本地大語言模型進行生成，藉此消除大模型的「幻覺」並給出精準、附帶文獻來源的專業解答。",
+    "id": 160
+  },
+  {
+    "source_file": "AquaRAG_系統架構與RAG模型建置指南.docx",
+    "chunk_title": "二、 RAG 模型建置流程與方法 (Complete Pipeline & Methodology)",
+    "content": "1. 文件結構化解析 (Document Parsing)\n將原始 Word 解答文件 (魚類生理學歷屆試題專家解答.docx) 解析。由於考題中包含複雜的段落、表格與特定格式，系統藉由 python-docx 遍歷所有段落與表格，並以正則表達式識別「第 X 套試題」與「第 X 題」。表格則轉譯為 Markdown Table 以利大模型理解，最終將 300 題結構化輸出為 JSON 檔。\n\n2. 語意向量化嵌入 (Vector Embedding)\n呼叫 Ollama 本地 API 的 `nomic-embed-text` 向量模型（維度為 768 維）。為了獲得最佳的檢索精準度，系統將「考試套數 + 題目名稱 + 原題重現 + 專家解答的前 1000 個字」拼接為一段文本，發送給模型產生語意向量。這確保了問題與答案的核心語意皆被編碼進向量空間。\n\n3. SQLite 向量資料庫建置 (Database Storage)\n將產生的 768 維向量轉換為 float32 numpy 數組，並以二進位 (BLOB) 格式儲存於 SQLite 資料庫 (`rag_database.db`) 中，同時一併儲存試題ID、考試套數、題號、題目與完整答案內容，建立高效率的關係型向量資料庫。",
+    "id": 161
+  },
+  {
+    "source_file": "AquaRAG_系統架構與RAG模型建置指南.docx",
+    "chunk_title": "二、 RAG 模型建置流程與方法 (Complete Pipeline & Methodology)",
+    "content": "4. 語意檢索與餘弦相似度計算 (Cosine Similarity Retrieval)\n當使用者輸入問題時，系統將問題同樣轉為 `nomic-embed-text` 向量，並以 NumPy 在記憶體中快速與資料庫的所有試題向量進行餘弦相似度 (Cosine Similarity) 計算，篩選出關聯度最高的前 4 題 (Top-4) 作為參考資料來源。若向量服務異常，系統則會自動降級為基於 TF-IDF 邏輯的關鍵字匹配。\n\n5. 檢索增強生成與 SSE 串流 (Generation & Streaming)\n系統將 Top-4 考題的專家解答作為「Context」，與使用者的問題、歷史對話一併包裝進預設的 System Prompt 中，發送給本地 `qwen2.5` 語言模型。最終透過 FastAPI 的 `StreamingResponse` 配合伺服器發送事件 (Server-Sent Events, SSE) 技術，實時將模型生成的解答串流顯示於前端 UI。",
+    "id": 162
+  },
+  {
+    "source_file": "AquaRAG_系統架構與RAG模型建置指南.docx",
+    "chunk_title": "• parser.py",
+    "content": "負責將 DOCX 轉換為結構化 JSON。\n• 使用 `iter_block_items` 循序走訪 Word 中的段落與表格，維持文件順序。\n• 以正則表達式 `^第\\s*(\\d+)\\s*套試題：` 與 `^第\\s*(\\d+)\\s*題：` 自動切割試卷與題號。\n• 包含 `table_to_markdown` 函數，將 Word 複雜表格自動轉為標準 Markdown 格式，以完美保留對照表等生理學數據。\n• 輸出 `parsed_questions.json` 供後續向量化使用。",
+    "id": 163
+  },
+  {
+    "source_file": "AquaRAG_系統架構與RAG模型建置指南.docx",
+    "chunk_title": "• embedder.py",
+    "content": "負責調用向量模型並建置 SQLite 資料庫。\n• 讀取 `parsed_questions.json`，對每道題目拼接特徵文本。\n• 透過 HTTP 請求調用 Ollama 的 `http://localhost:11434/api/embeddings` 連接埠，獲取 768 維的語意特徵向量。\n• 建立 `questions` 資料表（包含：id, exam_set, question_num, question_title, original_question, full_content, embedding）。\n• 使用 NumPy 的 `.tobytes()` 將向量數組存成 BLOB 欄位，加快資料庫寫入效能。",
+    "id": 164
+  },
+  {
+    "source_file": "AquaRAG_系統架構與RAG模型建置指南.docx",
+    "chunk_title": "• search_engine.py",
+    "content": "本系統的搜尋引擎核心模組。\n• 在類別 `SearchEngine` 初始化時，一次性將 SQLite 的二進位向量取出並還原為 NumPy 矩陣，快取於記憶體中以加速比對。\n• 提供 `search()` 函數，輸入自然語言查詢，透過 Cosine Similarity 計算與所有考題的相似分數並排序。\n• 內建 `keyword_search` 降級備援機制，當 Ollama 離線或找不到模型時，自動切換為關鍵字計分搜尋，確保服務不中斷。",
+    "id": 165
+  },
+  {
+    "source_file": "AquaRAG_系統架構與RAG模型建置指南.docx",
+    "chunk_title": "• app.py",
+    "content": "本系統的後端 Web 服務器 (FastAPI)。\n• 提供多個 API 端點，包括統計資訊 (`/api/stats`)、考題大綱 (`/api/exam-sets`) 以及單題詳解 (`/api/question/{qid}`)。\n• 實作 `/api/chat` 端點，負責接收聊天請求，先調用 `SearchEngine` 取得 Context，再透過 `requests` 以 Stream 方式向 Ollama 的 `qwen2.5` 請求生成解答。\n• 透過異步生成器以 Server-Sent Events (SSE) 協定，向前端輸出包含了考題引用標籤 (citations) 與流式文字。",
+    "id": 166
+  },
+  {
+    "source_file": "AquaRAG_系統架構與RAG模型建置指南.docx",
+    "chunk_title": "• static/app.js & index.html",
+    "content": "前端單頁式應用程式 (SPA) 的實作。\n• `index.html`：基於 CSS Grid 與 Flexbox 打造的極致深色質感動態介面，規劃了「RAG 智能對話」、「語意搜尋」、「歷屆試題瀏覽」與「資料統計」四大分頁。\n• `app.js`：處理頁面切換、即時查詢過濾、呼叫 `/api/chat` 讀取串流訊息並將 Markdown 即時轉譯為 HTML，並在對話泡泡中動態加入參考文獻來源的超連結按鈕。",
+    "id": 167
+  },
+  {
+    "source_file": "AquaRAG_系統架構與RAG模型建置指南.docx",
+    "chunk_title": "四、 系統快速重構與執行順序 (Build Pipeline Commands)",
+    "content": "| 建置順序 | 執行指令 | 階段輸出成果 |\n| --- | --- | --- |\n| Step 1: 文件解析 | python3 parser.py | 將 Word 轉為結構化的 parsed_questions.json |\n| Step 2: 向量庫初始化 | python3 embedder.py | 呼叫 Ollama 生成向量並建立 rag_database.db |\n| Step 3: 啟動後端服務 | python3 app.py | 啟動 FastAPI，監聽 http://localhost:8000 |\n",
+    "id": 168
+  },
+  {
+    "source_file": "LLM模型微調與自建訓練實務指南.docx",
+    "chunk_title": "前言",
+    "content": "LLM 大語言模型：自建預訓練與微調 (Fine-tuning) 實務指南\n\n技術白皮書  |  編寫：Antigravity  |  時間：2026年6月9日\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 169
+  },
+  {
+    "source_file": "LLM模型微調與自建訓練實務指南.docx",
+    "chunk_title": "一、 兩種訓練路線之深度剖析與資源對比",
+    "content": "在建立專屬大語言模型時，開發者面臨「從零開始預訓練」與「下遊微調（Fine-tuning）」兩條技術路徑。這兩者的定位、硬體需求與時間成本有著巨大的鴻溝。",
+    "id": 170
+  },
+  {
+    "source_file": "LLM模型微調與自建訓練實務指南.docx",
+    "chunk_title": "1.1 從零開始預訓練 (Pre-training from Scratch)",
+    "content": "• 定義：從隨機初始化的權重開始，餵入未標註的海量文本，透過無監督的下一標記預測 (Next-token Prediction) 進行訓練。\n• 優點：可自訂全新的詞表與架構，完全適應特定的語言或極端垂直的代碼格式。\n• 缺點與資源黑洞：這是極端耗費算力的路徑。要讓一個 1.5B ~ 7B 參數的模型具備基本邏輯與人類語言常識，需要吞噬數千億甚至數兆個 Token。個人或小團隊若無數十張 H100 顯示卡並持續執行數週，極難取得實用成果。若僅用單卡訓練數小時，模型產出的結果將只是語無倫次的無效拼湊。",
+    "id": 171
+  },
+  {
+    "source_file": "LLM模型微調與自建訓練實務指南.docx",
+    "chunk_title": "1.2 下遊微調 (Fine-tuning / SFT)",
+    "content": "• 定義：導入已在海量語料上訓練完畢的「開源基底模型」（如 Qwen2.5-1.5B, Llama-3.2-1B），保留其強大的語言常識，僅使用特定的高質量指令問答對 (Instruction Q&A) 進行有監督微調 (Supervised Fine-Tuning)。\n• 優點：極高效率。利用模型已有的語言理解能力，只需專注學習新領域的專有名詞、邏輯規律與輸出格式。在個人單卡 GPU 或 Mac M 晶片上，僅需 30 分鐘至數小時便能展現驚人效果，是當前學術界與產業界的主流選擇。",
+    "id": 172
+  },
+  {
+    "source_file": "LLM模型微調與自建訓練實務指南.docx",
+    "chunk_title": "1.2 下遊微調 (Fine-tuning / SFT)",
+    "content": "| 訓練方式 | 模型規模 | 語料數據量 | 硬體需求 (GPU) | 所需時間 |\n| --- | --- | --- | --- | --- |\n| 從零預訓練<br>(Toy Model) | 10M ~ 50M<br>(超迷你型) | 10 MB ~ 100 MB | 1x RTX 4060<br>(家用顯卡) | 30分鐘 ~ 2小時<br>(僅做原理練習) |\n| 從零預訓練<br>(實用 SLM) | 1B ~ 3B<br>(小量級模型) | 100 GB ~ 1 TB | 8x A100/H100<br>(企業級叢集) | 2週 ~ 2個月<br>(成本極其高昂) |\n| LoRA 微調<br>(SLM下遊) | 1B ~ 3B<br>(基於現成模板) | 1 MB ~ 20 MB<br>(數千問答對) | 1x RTX 4060 / 4090<br>或 Mac M 晶片 | 30分鐘 ~ 3小時<br>(高度推薦首選) |\n| QLoRA 微調<br>(標準大模型) | 7B ~ 8B<br>(如 Llama-3-8B) | 5 MB ~ 50 MB<br>(特定領域數據) | 1x RTX 4090 (24G)<br>或單張租用 GPU | 2小時 ~ 6小時<br>(可達商用效果) |\n",
+    "id": 173
+  },
+  {
+    "source_file": "LLM模型微調與自建訓練實務指南.docx",
+    "chunk_title": "二、 實務微調 (Fine-tuning) 關鍵技術",
+    "content": "若要在個人或有限算力下進行微調，必須依賴「參數高效微調」(Parameter-Efficient Fine-Tuning, PEFT) 技術：\n\n1. LoRA (Low-Rank Adaptation) 低秩適應\nLoRA 保持預訓練模型權重 (W) 凍結，並在 Transformer 的注意力矩陣旁引入兩個低維度的旁路權重矩陣 A 與 B（Rank r 通常設為 8 或 16）。訓練時僅更新 A 與 B 的參數，使需要訓練的參數降低 99.9% 以上，極大地減少了 GPU 顯存 (VRAM) 消耗與訓練時間，且幾乎不損失準確度。\n\n2. QLoRA (Quantized LoRA) 量化低秩適應\nQLoRA 進一步將底層預訓練模型以 4-bit NormalFloat (NF4) 格式進行高精度量化與凍結。這使得一個 7B 參數量級的模型，其基礎權重顯存佔用從原本的 16GB 暴降到僅約 5GB。搭配 LoRA 進行微調時，使得僅有 8GB 顯存的消費級 GPU（如 RTX 4060）也能輕鬆微調 7B 大模型，徹底打破了高不可攀的硬體門檻。",
+    "id": 174
+  },
+  {
+    "source_file": "LLM模型微調與自建訓練實務指南.docx",
+    "chunk_title": "3.1 準備微調數據格式 (dataset.jsonl)",
+    "content": "微調數據一般採 JSONL 格式，每一行代表一筆對話樣本。為了配合 Llama/Qwen 的 Chat 模板，格式如下：\n\n{\"messages\": [{\"role\": \"system\", \"content\": \"你是一個魚類生理學專家。\"}, {\"role\": \"user\", \"content\": \"硬骨魚如何調節滲透壓？\"}, {\"role\": \"assistant\", \"content\": \"淡水魚透過吸收鹽分與排出稀尿調節，海水魚則相反...\"}]}\n{\"messages\": [{\"role\": \"system\", \"content\": \"你是一個魚類生理學專家。\"}, {\"role\": \"user\", \"content\": \"魚類呼吸系統如何運作？\"}, {\"role\": \"assistant\", \"content\": \"魚類利用鰓進行對流交換...\"}]}",
+    "id": 175
+  },
+  {
+    "source_file": "LLM模型微調與自建訓練實務指南.docx",
+    "chunk_title": "3.2 完整微調 Python 程式碼範例",
+    "content": "以下是調用 Hugging Face `transformers`、`peft` 及 `trl` 庫進行 QLoRA 微調的標準 Python 程式碼：",
+    "id": 176
+  },
+  {
+    "source_file": "LLM模型微調與自建訓練實務指南.docx",
+    "chunk_title": "3.2 完整微調 Python 程式碼範例",
+    "content": "以下是調用 Hugging Face `transformers`、`peft` 及 `trl` 庫進行 QLoRA 微調的標準 Python 程式碼：\n\nimport torch\nfrom datasets import load_dataset\nfrom transformers import (\n    AutoModelForCausalLM,\n    AutoTokenizer,\n    BitsAndBytesConfig,\n    TrainingArguments\n)\nfrom peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training\nfrom trl import SFTTrainer\n\n# 1. 設定模型與資料路徑\nmodel_id = \"Qwen/Qwen2.5-1.5B-Instruct\"\ndataset_path = \"dataset.jsonl\"\n\n# 2. 配置 4-bit 量化參數 (QLoRA)\nbnb_config = BitsAndBytesConfig(\n    load_in_4bit=True,\n    bnb_4bit_quant_type=\"nf4\",\n    bnb_4bit_compute_dtype=torch.float16,\n    bnb_4bit_use_double_quant=True\n)\n\n# 3. 載入 Tokenizer 與模型\ntokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)\ntokenizer.pad_token = tokenizer.eos_token\n\nmodel = AutoModelForCausalLM.from_pretrained(\n    model_id,\n    quantization_config=bnb_config,\n    device_map=\"auto\",\n    trust_remote_code=True\n)\nmodel = prepare_model_for_kbit_training(model)\n\n# 4. 配置 PEFT / LoRA 參數\npeft_config = LoraConfig(\n    r=16,                       # LoRA Rank\n    lora_alpha=32,\n    target_modules=[\"q_proj\", \"k_proj\", \"v_proj\", \"o_proj\", \"gate_proj\", \"up_proj\", \"down_proj\"],\n    lora_dropout=0.05,\n    bias=\"none\",\n    task_type=\"CAUSAL_LM\"\n)\nmodel = get_peft_model(model, peft_config)\n\n# 5. 載入資料集\ndataset = load_dataset(\"json\", data_files=dataset_path, split=\"train\")\n\n# 6. 配置訓練超參數\ntraining_args = TrainingArguments(\n    output_dir=\"./qwen_lora_output\",\n    per_device_train_batch_size=4,\n    gradient_accumulation_steps=4,\n    learning_rate=2e-4,\n    logging_steps=10,\n    num_train_epochs=3,\n    fp16=True,\n    optim=\"paged_adamw_8bit\",\n    save_strategy=\"epoch\",\n    report_to=\"none\"\n)\n\n# 7. 啟動 SFT 訓練器\ntrainer = SFTTrainer(\n    model=model,\n    train_dataset=dataset,\n    peft_config=peft_config,\n    max_seq_length=1024,\n    tokenizer=tokenizer,\n    args=training_args,\n    dataset_text_field=\"messages\"\n)\n\nprint(\"開始訓練模型...\")\ntrainer.train()\ntrainer.model.save_pretrained(\"lora_weights\")\nprint(\"訓練完成，LoRA 權重已儲存！\")",
+    "id": 177
+  },
+  {
+    "source_file": "LLM模型微調與自建訓練實務指南.docx",
+    "chunk_title": "四、 部署與串接：微調模型導入 Ollama",
+    "content": "訓練完成後的 LoRA 權重，可以與原始模型權重進行合併 (Merge)，並轉換為 Llama.cpp 支援的 GGUF 格式，直接放進 Ollama 中：\n1. 合併權重：使用 PEFT 庫的 `model.merge_and_unload()` 產生無損的 FP16 Safetensors 權重檔案。\n2. 轉換 GGUF：下載 `llama.cpp`，執行轉換指令：\n   `python3 convert_hf_to_gguf.py ./merged_model --outfile qwen_custom.gguf`\n3. 量化處理 (選用，減少顯存佔用)：\n   `./llama-quantize qwen_custom.gguf qwen_custom_q4_k_m.gguf Q4_K_M`\n4. 撰寫 Ollama Modelfile：建立一個名稱為 `Modelfile` 的純文字檔，寫入：\n   `FROM ./qwen_custom_q4_k_m.gguf`\n5. 導入 Ollama 引擎：\n   `ollama create my_custom_model -f Modelfile`\n6. 應用於專案中：最後，修改您的 `app.py`，將連接 Ollama 的 payload 中 `\"model\": \"qwen2.5\"` 修改為 `\"model\": \"my_custom_model\"`，即可在網頁端對話時調用您自建的微調模型！",
+    "id": 178
+  },
+  {
+    "source_file": "自建小型LLM模型技術指南.docx",
+    "chunk_title": "前言",
+    "content": "自建小型大語言模型 (LLM) 技術指南\n從零開始的 Transformer 設計、訓練與部署\n\n技術指南  |  編寫：Antigravity  |  時間：2026年6月9日\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "id": 179
+  },
+  {
+    "source_file": "自建小型LLM模型技術指南.docx",
+    "chunk_title": "一、 自建小型 LLM 的五大核心步驟",
+    "content": "要從零建置一個專屬的小型大語言模型，完整的開發生命週期包含以下五個核心步驟：\n\n1. 資料收集與預處理 (Data Preparation)\n模型的能力完全取決於餵給它的資料。首先需收集數十 MB 到數 GB 的文本資料（例如維基百科、專業領域書籍、對話紀錄），進行清洗（去重、去除無意義符號、轉換為統一字元編碼，如 UTF-8）。\n\n2. 設計分詞器 (Tokenizer)\n計算機無法理解文字，必須透過分詞器將文字對應成整數 ID 列表。對於小型模型，可採用簡易的字元級分詞器 (Character-level Tokenizer，如每個字元一個 ID) 或調用 BPE (Byte-Pair Encoding) 分詞器（如 Hugging Face 的 Tokenizers 庫，將常用字詞組合成 Token），並產生一個詞表 (Vocabulary)。\n\n3. 定義模型架構 (Model Architecture)\n現代 LLM 普遍採用 Decoder-Only（僅解碼器）的 Transformer 架構（與 GPT 系列、Llama 系列相同）。核心包含：自注意力機制 (Self-Attention)、多頭注意力 (Multi-Head Attention)、前饋神經網路 (Feed-Forward Network) 以及殘差連接與層歸一化 (Layer Normalization)。",
+    "id": 180
+  },
+  {
+    "source_file": "自建小型LLM模型技術指南.docx",
+    "chunk_title": "一、 自建小型 LLM 的五大核心步驟",
+    "content": "4. 模型預訓練 (Pre-training / Next-token Prediction)\n此階段模型學習語言的基本規律與知識。給定前 N 個 Token，預測第 N+1 個 Token。利用 Cross-Entropy Loss 計算預測與真實字元的差距，透過 AdamW 優化器不斷調整權重參數。一般在 GPU (如 NVIDIA RTX 系列或 Mac M 系列晶片的 Unified Memory) 上訓練數小時至數天。\n\n5. 指令微調與推理 (Supervised Fine-Tuning & Inference)\n預訓練完成的模型只會「接龍」文字。為了讓它能回答問題，需要進行「指令微調」(SFT)，餵入「問題-答案」對（如：Q: 什麼是滲透壓？ A: 滲透壓是...）。微調後即可透過貪婪搜尋 (Greedy Search) 或 Top-p 取樣演算法進行文字推理生成。",
+    "id": 181
+  },
+  {
+    "source_file": "自建小型LLM模型技術指南.docx",
+    "chunk_title": "二、 核心架構實作：PyTorch Mini-GPT 原始碼",
+    "content": "以下為基於 PyTorch 框架實作的迷你 GPT 模型核心結構。它展示了如何定義多頭注意力、Transformer 區塊，以及自回歸的語言模型本體：",
+    "id": 182
+  },
+  {
+    "source_file": "自建小型LLM模型技術指南.docx",
+    "chunk_title": "二、 核心架構實作：PyTorch Mini-GPT 原始碼",
+    "content": "以下為基於 PyTorch 框架實作的迷你 GPT 模型核心結構。它展示了如何定義多頭注意力、Transformer 區塊，以及自回歸的語言模型本體：\n\nimport torch\nimport torch.nn as nn\nfrom torch.nn import functional as F\n\nclass Head(nn.Module):\n    \"\"\" 單個自注意力頭 (Single Self-Attention Head) \"\"\"\n    def __init__(self, head_size, n_embd, block_size):\n        super().__init__()\n        self.key = nn.Linear(n_embd, head_size, bias=False)\n        self.query = nn.Linear(n_embd, head_size, bias=False)\n        self.value = nn.Linear(n_embd, head_size, bias=False)\n        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))\n\n    def forward(self, x):\n        B, T, C = x.shape\n        k = self.key(x)    # (B, T, head_size)\n        q = self.query(x)  # (B, T, head_size)\n        # 計算注意力分數 (Attention Scores)\n        wei = q @ k.transpose(-2, -1) * C**-0.5 # (B, T, T)\n        wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf')) # 因果遮罩\n        wei = F.softmax(wei, dim=-1)\n        # 加權求和\n        v = self.value(x)  # (B, T, head_size)\n        return wei @ v     # (B, T, head_size)\n\nclass MultiHeadAttention(nn.Module):\n    \"\"\" 多頭自注意力機制 (Multi-Head Attention) \"\"\"\n    def __init__(self, num_heads, head_size, n_embd, block_size):\n        super().__init__()\n        self.heads = nn.ModuleList([Head(head_size, n_embd, block_size) for _ in range(num_heads)])\n        self.proj = nn.Linear(n_embd, n_embd)\n\n    def forward(self, x):\n        out = torch.cat([h(x) for h in self.heads], dim=-1)\n        return self.proj(out)\n\nclass FeedForward(nn.Module):\n    \"\"\" 簡單線性前饋網路 \"\"\"\n    def __init__(self, n_embd):\n        super().__init__()\n        self.net = nn.Sequential(\n            nn.Linear(n_embd, 4 * n_embd),\n            nn.ReLU(),\n            nn.Linear(4 * n_embd, n_embd)\n        )\n\n    def forward(self, x):\n        return self.net(x)\n\nclass Block(nn.Module):\n    \"\"\" Transformer 運算區塊 (Block) \"\"\"\n    def __init__(self, n_embd, n_head, block_size):\n        super().__init__()\n        head_size = n_embd // n_head\n        self.sa = MultiHeadAttention(n_head, head_size, n_embd, block_size)\n        self.ffwd = FeedForward(n_embd)\n        self.ln1 = nn.LayerNorm(n_embd)\n        self.ln2 = nn.LayerNorm(n_embd)\n\n    def forward(self, x):\n        x = x + self.sa(self.ln1(x))   # 殘差連接與 LayerNorm\n        x = x + self.ffwd(self.ln2(x))\n        return x\n\nclass MiniGPT(nn.Module):\n    \"\"\" 迷你 GPT 語言模型本體 \"\"\"\n    def __init__(self, vocab_size, n_embd, n_head, n_layer, block_size):\n        super().__init__()\n        self.token_embedding_table = nn.Embedding(vocab_size, n_embd)\n        self.position_embedding_table = nn.Embedding(block_size, n_embd)\n        self.blocks = nn.Sequential(*[Block(n_embd, n_head, block_size) for _ in range(n_layer)])\n        self.ln_f = nn.LayerNorm(n_embd)\n        self.lm_head = nn.Linear(n_embd, vocab_size)\n        self.block_size = block_size\n\n    def forward(self, idx, targets=None):\n        B, T = idx.shape\n        tok_emb = self.token_embedding_table(idx) # (B, T, n_embd)\n        pos_emb = self.position_embedding_table(torch.arange(T, device=idx.device)) # (T, n_embd)\n        x = tok_emb + pos_emb\n        x = self.blocks(x)\n        x = self.ln_f(x)\n        logits = self.lm_head(x) # (B, T, vocab_size)\n\n        loss = None\n        if targets is not None:\n            B, T, C = logits.shape\n            logits = logits.view(B*T, C)\n            targets = targets.view(B*T)\n            loss = F.cross_entropy(logits, targets)\n        return logits, loss",
+    "id": 183
+  },
+  {
+    "source_file": "自建小型LLM模型技術指南.docx",
+    "chunk_title": "三、 小型 LLM 之參數規模與硬體資源估算",
+    "content": "| 模型等級/參數 | 適合訓練語料大小 | 硬體需求 (GPU VRAM) | 典型代表模型 |\n| --- | --- | --- | --- |\n| Tiny GPT (約 10M - 50M) | 10 MB - 100 MB | 2 GB - 4 GB (一般家用電腦可跑) | Character-level GPT-2 |\n| Small LLM (約 100M - 500M) | 100 MB - 2 GB | 6 GB - 8 GB (RTX 4060 等級) | GPT-2 Small / BERT |\n| SLM (1B - 3B 參數量級) | 10 GB - 100 GB | 16 GB+ VRAM (單卡 RTX 4090) | Qwen2.5-1.5B / Llama-3.2-1B / Gemma-2B |\n| Standard LLM (7B - 8B) | 500 GB - 5 TB | A100 / H100 多卡叢林 | Llama-3-8B / Qwen2.5-7B |\n",
+    "id": 184
+  },
+  {
+    "source_file": "自建小型LLM模型技術指南.docx",
+    "chunk_title": "四、 實務開發心法與建議路徑",
+    "content": "若欲在個人環境快速建置一個能用的專屬模型，建議採取以下「捷徑」避開極高昂的預訓練成本：\n1. 使用預訓練權重做微調 (LoRA Fine-tuning)：不從零訓練 Transformer。直接從 Hugging Face 下載 Llama-3.2-1B 或 Qwen2.5-1.5B 的開源權重，利用 LoRA (Low-Rank Adaptation) 技術，在 1 張消費級 GPU 上花費幾小時，微調您自己的垂直領域問答集。\n2. 使用 Hugging Face TRL 庫：使用它的 SFTTrainer，只需撰寫 10 行 Python 代碼即可完成微調，對硬體及演算法優化的難度大幅降低。\n3. 本地推論與部屬：訓練好後，將權重匯出為 GGUF 格式，即可直接放進 Ollama 中執行，達成與您本專案相似的 RAG 架構串接。",
+    "id": 185
+  }
+]

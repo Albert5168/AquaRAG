@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>魚類生理學國考歷屆試題 RAG 專家系統</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700;900&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="logo-area">
+                <div class="logo-icon">
+                    <i class="fa-solid fa-fish-fins"></i>
+                </div>
+                <div class="logo-text">
+                    <h1>AquaRAG</h1>
+                    <span>魚類生理學專家解答</span>
+                </div>
+            </div>
+            
+            <nav class="nav-menu">
+                <button class="nav-btn active" data-tab="chat-tab">
+                    <i class="fa-solid fa-comments"></i>
+                    <span>RAG 智能對話</span>
+                </button>
+                <button class="nav-btn" data-tab="search-tab">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <span>語意搜尋</span>
+                </button>
+                <button class="nav-btn" data-tab="explorer-tab">
+                    <i class="fa-solid fa-book-open"></i>
+                    <span>歷屆試題瀏覽</span>
+                </button>
+                <button class="nav-btn" data-tab="stats-tab">
+                    <i class="fa-solid fa-chart-simple"></i>
+                    <span>資料統計與介紹</span>
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="model-badge">
+                    <span class="pulse-dot"></span>
+                    <div class="model-info">
+                        <span class="model-name">Qwen-2.5 7B</span>
+                        <span class="model-desc">Local LLM via Ollama</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Viewport -->
+        <main class="main-content">
+            <!-- HEADER -->
+            <header class="app-header">
+                <div class="header-title">
+                    <h2 id="current-tab-title">RAG 智能對話</h2>
+                    <p id="current-tab-desc">基於 082 年至 114 年國家考試「魚類生理學」歷屆 300 題專家解答進行檢索生成</p>
+                </div>
+                <div class="header-actions">
+                    <div class="system-status">
+                        <i class="fa-solid fa-circle-check"></i>
+                        <span>系統已連線</span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- TAB CONTROLLERS -->
+            <div class="tab-viewport">
+                
+                <!-- CHAT TAB (RAG Chat) -->
+                <section id="chat-tab" class="tab-content active">
+                    <div class="chat-wrapper">
+                        <!-- Message History Area -->
+                        <div class="chat-history" id="chat-history">
+                            <div class="message system-msg">
+                                <div class="msg-avatar"><i class="fa-solid fa-robot"></i></div>
+                                <div class="msg-content">
+                                    <p>您好！我是 AquaRAG 專家助理。我已完整載入<strong>「魚類生理學與高等魚類生理學」</strong>從民國 82 年至 114 年國家考試（公務人員高考、地方特考、升等考試）共 60 套試題、300 題專家深度解答。</p>
+                                    <p>您可以向我提問任何有關魚類生理學的學術機制、滲透壓調控、消化吸收、循環呼吸、內分泌或水產養殖現場實務應用的問題！</p>
+                                    <div class="suggested-queries">
+                                        <button class="suggest-btn">淡水與海水硬骨魚滲透壓調節機制的差異？</button>
+                                        <button class="suggest-btn">請說明並繪圖比較魚類與哺乳類之循環系統異同。</button>
+                                        <button class="suggest-btn">什麼是「鹹化去腥提鮮法」的生理學原理？</button>
+                                        <button class="suggest-btn">肉食性魚類與草食性魚類的消化道有何不同？</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Retrieved Citations Drawer (collapsible / overlay) -->
+                        <div class="citations-panel" id="citations-panel" style="display: none;">
+                            <div class="citations-header">
+                                <h3><i class="fa-solid fa-quote-left"></i> 本次回答檢索參考來源</h3>
+                                <button class="close-citations" id="close-citations-btn"><i class="fa-solid fa-xmark"></i></button>
+                            </div>
+                            <div class="citations-list" id="citations-list">
+                                <!-- Dynamic citations -->
+                            </div>
+                        </div>
+
+                        <!-- Chat Input Area -->
+                        <div class="chat-input-area">
+                            <form id="chat-form" class="chat-form">
+                                <textarea id="chat-input" placeholder="輸入您的生理學問題... (按 Enter 傳送，Shift+Enter 換行)" rows="1" required></textarea>
+                                <button type="submit" id="send-btn" class="send-button">
+                                    <i class="fa-solid fa-paper-plane"></i>
+                                </button>
+                            </form>
+                            <div class="chat-input-tips">
+                                <span>* 本回答採用 RAG 技術實時檢索，能防止大模型幻覺，提供 100% 精確的專家解答與文獻來源。</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- SEARCH TAB (Semantic Search) -->
+                <section id="search-tab" class="tab-content">
+                    <div class="search-wrapper">
+                        <div class="search-bar-container">
+                            <div class="search-input-group">
+                                <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                                <input type="text" id="search-query" placeholder="輸入關鍵字或生理學概念，如：滲透壓、腦下垂體、血紅素...">
+                                <button id="search-submit" class="search-button-btn">搜尋</button>
+                            </div>
+                            <div class="search-filters">
+                                <div class="filter-item">
+                                    <label for="search-top-k">回傳數量 (Top-K):</label>
+                                    <input type="range" id="search-top-k" min="1" max="10" value="5">
+                                    <span id="top-k-val">5</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="search-results-container">
+                            <div class="results-stats" id="search-results-stats" style="display: none;">
+                                找到 <span id="results-count">0</span> 筆相關題目與專家解析
+                            </div>
+                            <div class="search-results-list" id="search-results-list">
+                                <div class="empty-state">
+                                    <i class="fa-solid fa-magnifying-glass"></i>
+                                    <p>輸入查詢並開始搜尋，系統將透過向量模型進行語意匹配</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- EXPLORER TAB (Tree View & Content Viewer) -->
+                <section id="explorer-tab" class="tab-content">
+                    <div class="explorer-wrapper">
+                        <!-- Left tree selector -->
+                        <div class="explorer-sidebar">
+                            <div class="explorer-search-box">
+                                <i class="fa-solid fa-filter"></i>
+                                <input type="text" id="explorer-filter" placeholder="篩選套數/年份 (如 112)...">
+                            </div>
+                            <div class="tree-container" id="tree-container">
+                                <!-- Dynamic tree nodes -->
+                                <div class="tree-loading"><i class="fa-solid fa-spinner fa-spin"></i> 載入試題庫中...</div>
+                            </div>
+                        </div>
+
+                        <!-- Right detail viewer -->
+                        <div class="explorer-content">
+                            <div class="content-placeholder" id="content-placeholder">
+                                <i class="fa-solid fa-book-open-reader"></i>
+                                <h3>歷屆試題瀏覽器</h3>
+                                <p>請從左側列表中選擇一套試題與具體題目，即可在此處檢視專家的完整分析與解答</p>
+                            </div>
+                            <article class="question-detail" id="question-detail" style="display: none;">
+                                <div class="detail-header">
+                                    <span class="detail-badge" id="detail-exam-set">082年薦任升等</span>
+                                    <h2 class="detail-title" id="detail-q-title">題目載入中...</h2>
+                                    <div class="detail-meta">
+                                        <span class="meta-item"><i class="fa-solid fa-hashtag"></i> <span id="detail-q-num">第 1 題</span></span>
+                                    </div>
+                                </div>
+                                <hr class="detail-divider">
+                                <div class="detail-body markdown-content" id="detail-content">
+                                    <!-- Dynamic html content -->
+                                </div>
+                            </article>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- STATS & ABOUT TAB -->
+                <section id="stats-tab" class="tab-content">
+                    <div class="stats-wrapper">
+                        <!-- Stat Grid Cards -->
+                        <div class="stats-grid">
+                            <div class="stat-card">
+                                <div class="stat-icon cyan"><i class="fa-solid fa-folder-open"></i></div>
+                                <div class="stat-numbers" id="stat-exam-sets">60</div>
+                                <div class="stat-label">收錄國考套數</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-icon green"><i class="fa-solid fa-circle-question"></i></div>
+                                <div class="stat-numbers" id="stat-questions">300</div>
+                                <div class="stat-label">專家解答題目</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-icon purple"><i class="fa-solid fa-layer-group"></i></div>
+                                <div class="stat-numbers">768</div>
+                                <div class="stat-label">向量維度 (nomic-embed)</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-icon orange"><i class="fa-solid fa-database"></i></div>
+                                <div class="stat-numbers" id="stat-db-size">1.58 MB</div>
+                                <div class="stat-label">向量資料庫大小</div>
+                            </div>
+                        </div>
+
+                        <!-- System Architecture Section -->
+                        <div class="architecture-section">
+                            <h2><i class="fa-solid fa-gears"></i> 系統運作原理 (RAG System Flow)</h2>
+                            <div class="flow-chart">
+                                <div class="flow-step">
+                                    <div class="step-num">1</div>
+                                    <i class="fa-solid fa-file-word"></i>
+                                    <h4>文件拆解與解析</h4>
+                                    <p>將 Word 檔結構化切分為 300 題獨立考題，提取專家解析、對照表格及關鍵字</p>
+                                </div>
+                                <div class="flow-arrow"><i class="fa-solid fa-arrow-right"></i></div>
+                                <div class="flow-step">
+                                    <div class="step-num">2</div>
+                                    <i class="fa-solid fa-brain"></i>
+                                    <h4>向量化與索引</h4>
+                                    <p>調用 <code>nomic-embed-text</code> 生成向量嵌入，並將考題關聯、表格結構儲存於 SQLite</p>
+                                </div>
+                                <div class="flow-arrow"><i class="fa-solid fa-arrow-right"></i></div>
+                                <div class="flow-step">
+                                    <div class="step-num">3</div>
+                                    <i class="fa-solid fa-magnifying-glass"></i>
+                                    <h4>語意向量檢索</h4>
+                                    <p>使用者輸入問題後，即時轉換為查詢向量，利用 NumPy 快速計算餘弦相似度，提取 Top-4 關聯解答</p>
+                                </div>
+                                <div class="flow-arrow"><i class="fa-solid fa-arrow-right"></i></div>
+                                <div class="flow-step">
+                                    <div class="step-num">4</div>
+                                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                                    <h4>脈絡強化生成</h4>
+                                    <p>將 Top-4 考題與解析組裝為 Context，餵入 <code>qwen2.5 (7B)</code> 本地大模型，流式輸出專業擬真解答</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Developer notes -->
+                        <div class="dev-notes">
+                            <h3><i class="fa-solid fa-circle-info"></i> 關於本手冊收錄範圍與備考指引</h3>
+                            <p>本系統所使用之知識庫完整收錄民國 82 年至 114 年「公務人員高等考試三級考試」、「特種考試地方政府公務人員考試三等」、「公務人員升等/升官等薦任級」等之魚類生理學、高等魚類生理學科目之所有試題。本 RAG 系統由 Antigravity 代理程式開發，旨在協助學術研究與考生高效備考，掌握國考解題邏輯與實務應用。</p>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- CITATION MODAL / LIGHTBOX -->
+    <div class="modal-overlay" id="citation-modal">
+        <div class="modal-container">
+            <div class="modal-header">
+                <span class="modal-badge" id="modal-exam-set">考試科目資訊</span>
+                <h3 id="modal-title">題目資訊</h3>
+                <button class="modal-close" id="modal-close-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body markdown-content" id="modal-content">
+                <!-- Question Details -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom JS -->
+    <script src="/static/app.js"></script>
+</body>
+</html>
