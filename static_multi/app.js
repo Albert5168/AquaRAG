@@ -233,11 +233,25 @@ document.addEventListener("DOMContentLoaded", () => {
             statQuestions.textContent = data.questions_count;
             statDbSize.textContent = `${data.db_size_mb} MB`;
             
-            if (data.active_model) {
-                document.querySelector(".model-name").textContent = data.active_model;
-            }
-            if (data.active_desc) {
-                document.querySelector(".model-desc").textContent = data.active_desc;
+            // Check for user-configured API Provider
+            const customProvider = localStorage.getItem("aquarag_api_provider") || "system-default";
+            const customModel = localStorage.getItem("aquarag_api_model") || "";
+            
+            if (customProvider === "gemini") {
+                const modelName = customModel ? ("Gemini " + customModel) : "Gemini (User Key)";
+                document.querySelector(".model-name").textContent = modelName;
+                document.querySelector(".model-desc").textContent = "Cloud LLM via User Gemini Key";
+            } else if (customProvider === "openrouter") {
+                document.querySelector(".model-name").textContent = customModel || "OpenRouter Free";
+                document.querySelector(".model-desc").textContent = "Cloud LLM via OpenRouter";
+            } else {
+                // System default
+                if (data.active_model) {
+                    document.querySelector(".model-name").textContent = data.active_model;
+                }
+                if (data.active_desc) {
+                    document.querySelector(".model-desc").textContent = data.active_desc;
+                }
             }
         } catch (e) {
             console.error("Failed to load statistics:", e);

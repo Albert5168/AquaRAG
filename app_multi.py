@@ -38,6 +38,17 @@ else:
     bundle_dir = os.path.dirname(os.path.abspath(__file__))
     is_frozen = False
 
+def clean_model_name(model_id: str, default_model: str = "gemini-2.0-flash") -> str:
+    if not model_id:
+        return default_model
+    model_id = model_id.strip().strip('"').strip("'")
+    if (model_id.startswith("AIzaSy") or 
+        model_id.startswith("AQ.") or 
+        model_id.startswith("sk-or-") or 
+        len(model_id) > 25):
+        return default_model
+    return model_id
+
 # Resolve Database Path
 DB_PATH = os.path.join(os.getcwd(), "multi_knowledge.db")
 if not os.path.exists(DB_PATH):
@@ -103,7 +114,7 @@ def get_stats():
     db_size_mb = os.path.getsize(db_path) / (1024 * 1024)
     
     if os.getenv("GEMINI_API_KEY"):
-        model_id = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip().strip('"').strip("'")
+        model_id = clean_model_name(os.getenv("GEMINI_MODEL", "gemini-2.0-flash"))
         if model_id.startswith("models/"):
             model_id = model_id[7:]
         active_model = " ".join([w.capitalize() for w in model_id.split("-")])
@@ -336,7 +347,7 @@ async def sse_chat_generator(message: str, history: List[Dict[str, str]], custom
                 mgr = client._ClientManager()
                 mgr.configure(api_key=key)
                 
-                model_id = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip().strip('"').strip("'")
+                model_id = clean_model_name(os.getenv("GEMINI_MODEL", "gemini-2.0-flash"))
                 model = genai.GenerativeModel(model_id)
                 model._client = mgr.get_default_client("generative")
                 model._async_client = mgr.get_default_client("generative_async")
