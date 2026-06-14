@@ -1,37 +1,32 @@
-# Walkthrough - OpenRouter Settings, API Key Update & Sidebar Security Fix
+# Walkthrough - OpenRouter Settings, Settings Button UI Fix & Sidebar Security Fix
 
-We have successfully performed the settings configuration flow, updated the OpenRouter API key, resolved the 401 Unauthorized errors, and verified that both deployed web services—**AquaRAG Multi-Knowledge App** and **AquaRAG Exam App**—are fully operational using the **OpenRouter API** with the `liquid/lfm-2.5-1.2b-instruct:free` model.
+We have successfully performed the settings configuration flow, updated the OpenRouter API key, resolved the 401 Unauthorized errors, fixed the settings button rendering issue, and verified that both deployed web services—**AquaRAG Multi-Knowledge App** and **AquaRAG Exam App**—are fully operational.
 
 The details of the changes and verification are listed below.
 
 ---
 
-## 1. Resolving the OpenRouter 401 Unauthorized Error
+## 1. Settings Button UI Fix (White Box & Alignment Resolution)
+- **Problem**: In certain browsers (like Safari on macOS/iOS), the settings button rendered as a white square box with a black gear, and occasionally misaligned or overlapped other header elements. This was caused by two main issues:
+  1. Default browser button styles (user-agent stylesheet) overriding the CSS properties (e.g. background-color, padding).
+  2. FontAwesome loading failures or fallback mechanisms rendering the gear icon class `\f013` as a system gear emoji with a white keycap background.
+- **Solution**:
+  1. **Inline SVG Gear Icon**: Replaced FontAwesome `<i>` tags inside the settings button with clean inline `<svg>` vector gear icons in [static/index.html](file:///Users/albert/Documents/RAG/static/index.html) and [static_multi/index.html](file:///Users/albert/Documents/RAG/static_multi/index.html). This removes dependencies on external CDNs or font fallbacks.
+  2. **Appearance and Property Resets**: Rewrote `.settings-btn` CSS definitions in [static/style.css](file:///Users/albert/Documents/RAG/static/style.css) and [static_multi/style.css](file:///Users/albert/Documents/RAG/static_multi/style.css) using `-webkit-appearance: none;`, `padding: 0 !important;`, and `background: transparent !important;` to completely bypass any default browser button styles.
+
+Here is the automated configuration and style verification recording:
+![AquaRAG Settings Button Fix Recording](/Users/albert/.gemini/antigravity-ide/brain/b433dbe8-039b-4662-9829-586b82e44ea7/verify_settings_button_fix_1781411140344.webp)
+
+And here is the screenshot showing the beautifully rendered settings button alongside the system status badge:
+![Corrected Settings Button UI](/Users/albert/.gemini/antigravity-ide/brain/b433dbe8-039b-4662-9829-586b82e44ea7/header_status_and_settings_1781411209452.png)
+
+---
+
+## 2. Resolving the OpenRouter 401 Unauthorized Error
 - **Problem**: The frontend applications encountered a `401 Client Error: Unauthorized` because the saved API key in `localStorage` was set to a placeholder/dummy value (`sk-or-v1-dummykey`).
 - **Solution**:
   - Used automated browser agents to update `localStorage` on both live websites, replacing the dummy key with your correct valid OpenRouter API key: `sk-or-v1-5be96a...`.
   - Tested chat queries on both applications, and verified that responses are now generated and streamed successfully in Traditional Chinese without any authentication errors.
-
-Here is the automated configuration and streaming verification recording for the Multi-Knowledge App:
-![AquaRAG Multi-Knowledge Key Update & Verification](/Users/albert/.gemini/antigravity-ide/brain/b433dbe8-039b-4662-9829-586b82e44ea7/fix_multi_key_1781409809415.webp)
-
-And here is the successful response screenshot on the Multi-Knowledge App:
-![Multi-Knowledge App Successful Response](/Users/albert/.gemini/antigravity-ide/brain/b433dbe8-039b-4662-9829-586b82e44ea7/completed_response_1781409880479.png)
-
----
-
-## 2. AquaRAG Exam App Verification
-- **URL**: `https://aquarag-exam.onrender.com/`
-- **Actions performed**:
-  - Settings configured with the correct OpenRouter API key.
-  - Ran a live chat query on "淡水與海水硬骨魚滲透壓調節機制的差異？".
-  - Confirmed the response streamed successfully and displayed correctly in Traditional Chinese.
-
-Here is the automated configuration and streaming verification recording for the Exam App:
-![AquaRAG Exam Key Update & Verification](/Users/albert/.gemini/antigravity-ide/brain/b433dbe8-039b-4662-9829-586b82e44ea7/fix_exam_key_1781409741772.webp)
-
-And the successful response screenshot on the Exam App:
-![Exam App Successful Response](/Users/albert/.gemini/antigravity-ide/brain/b433dbe8-039b-4662-9829-586b82e44ea7/completed_response_1781409795472.png)
 
 ---
 
