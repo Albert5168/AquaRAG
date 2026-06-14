@@ -73,6 +73,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     history: List[ChatMessage]
+    api_key: str = None
 
 @app.get("/api/stats")
 def get_stats():
@@ -210,7 +211,7 @@ def search(q: str, top_k: int = 5):
         })
     return formatted_results
 
-async def sse_chat_generator(message: str, history: List[Dict[str, str]]):
+async def sse_chat_generator(message: str, history: List[Dict[str, str]], custom_api_key: str = None):
     # 1. Retrieve top-4 relevant chunks
     results = search_engine.search(message, top_k=4)
     
@@ -252,37 +253,58 @@ async def sse_chat_generator(message: str, history: List[Dict[str, str]]):
         "請開始答題："
     )
     
-    # Check if GEMINI_API_KEY is present
-    gemini_key = os.getenv("GEMINI_API_KEY")
-    if gemini_key:
-        try:
-            genai.configure(api_key=gemini_key)
-            model_id = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip().strip('"').strip("'")
-            model = genai.GenerativeModel(model_id)
-            
-            # Format history for Gemini chat
-            gemini_history = []
-            for msg in history:
-                gemini_history.append({
-                    "role": "user" if msg["role"] == "user" else "model",
-                    "parts": [msg["content"]]
-                })
-            
-            chat = model.start_chat(history=gemini_history)
-            response = chat.send_message(prompt, stream=True)
-            
-            for chunk in response:
-                if chunk.text:
-                    content_tw = zhconv.convert(chunk.text, "zh-tw")
-                    payload_data = {"text": content_tw}
-                    yield f"event: text\ndata: {json.dumps(payload_data, ensure_ascii=False)}\n\n"
-            
-            yield "event: done\ndata: {}\n\n"
-            return
-        except Exception as e:
-            err_data = {"error": f"Gemini API Error: {str(e)}"}
-            yield f"event: error\ndata: {json.dumps(err_data, ensure_ascii=False)}\n\n"
-            return
+    # Check Gemini keys to try
+    keys_to_try = []
+    if custom_api_key and custom_api_key.strip():
+        keys_to_try.append(custom_api_key.strip())
+    elif os.getenv("GEMINI_API_KEY"):
+        raw_keys = os.getenv("GEMINI_API_KEY").split(",")
+        for k in raw_keys:
+            k_clean = k.strip().strip('"').strip("'").strip()
+            if k_clean:
+                keys_to_try.append(k_clean)
+
+    if keys_to_try:
+        last_err = None
+        for key in keys_to_try:
+            try:
+                from google.generativeai import client
+                mgr = client._ClientManager()
+                mgr.configure(api_key=key)
+                
+                model_id = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip().strip('"').strip("'")
+                model = genai.GenerativeModel(model_id)
+                model._client = mgr.get_default_client("generative")
+                model._async_client = mgr.get_default_client("generative_async")
+                
+                # Format history for Gemini chat
+                gemini_history = []
+                for msg in history:
+                    gemini_history.append({
+                        "role": "user" if msg["role"] == "user" else "model",
+                        "parts": [msg["content"]]
+                    })
+                
+                chat = model.start_chat(history=gemini_history)
+                response = chat.send_message(prompt, stream=True)
+                
+                for chunk in response:
+                    if chunk.text:
+                        content_tw = zhconv.convert(chunk.text, "zh-tw")
+                        payload_data = {"text": content_tw}
+                        yield f"event: text\ndata: {json.dumps(payload_data, ensure_ascii=False)}\n\n"
+                
+                yield "event: done\ndata: {}\n\n"
+                return
+            except Exception as e:
+                last_err = e
+                err_str = str(e)
+                print(f"Gemini API attempt failed with key ending in ...{key[-6:] if len(key) > 6 else key}: {err_str}")
+                continue
+                
+        err_data = {"error": f"Gemini API Error (All keys exhausted): {str(last_err)}"}
+        yield f"event: error\ndata: {json.dumps(err_data, ensure_ascii=False)}\n\n"
+        return
 
     # 3. Format history for Ollama chat
     ollama_messages = []
@@ -328,7 +350,7 @@ async def sse_chat_generator(message: str, history: List[Dict[str, str]]):
 async def chat(request: ChatRequest):
     history_dicts = [{"role": msg.role, "content": msg.content} for msg in request.history]
     return StreamingResponse(
-        sse_chat_generator(request.message, history_dicts),
+        sse_chat_generator(request.message, history_dicts, custom_api_key=request.api_key),
         media_type="text/event-stream"
     )
 

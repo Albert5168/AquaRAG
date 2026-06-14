@@ -66,6 +66,9 @@
                     <p id="current-tab-desc">基於收錄之多維度技術手冊與網頁說明文件進行向量檢索生成</p>
                 </div>
                 <div class="header-actions">
+                    <button id="settings-toggle-btn" class="settings-btn" title="系統設定">
+                        <i class="fa-solid fa-gear"></i>
+                    </button>
                     <div class="system-status">
                         <i class="fa-solid fa-circle-check"></i>
                         <span>系統已連線</span>
@@ -276,6 +279,36 @@
             </div>
             <div class="modal-body markdown-content" id="modal-content">
                 <!-- Question Details -->
+            </div>
+        </div>
+    </div>
+
+    <!-- SETTINGS MODAL -->
+    <div class="modal-overlay" id="settings-modal">
+        <div class="modal-container">
+            <div class="modal-header">
+                <span class="modal-badge" style="background-color: rgba(0, 242, 254, 0.08); border-color: rgba(0, 242, 254, 0.2); color: var(--accent-cyan);"><i class="fa-solid fa-sliders"></i> 系統設定</span>
+                <h3 style="margin-top: 4px;">AquaRAG 偏好設定</h3>
+                <button class="modal-close" id="settings-close-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body settings-body">
+                <div class="setting-group">
+                    <label for="user-gemini-key">自訂 Gemini API Key</label>
+                    <div class="input-with-icon">
+                        <i class="fa-solid fa-key"></i>
+                        <input type="password" id="user-gemini-key" placeholder="貼上您的 AI Studio Gemini API Key (不儲存於伺服器)">
+                        <button type="button" id="toggle-key-visibility" class="toggle-visibility-btn">
+                            <i class="fa-solid fa-eye"></i>
+                        </button>
+                    </div>
+                    <p class="setting-help">
+                        若系統預設金鑰配額用盡（429 錯誤），可在此填入您自己的 API Key。該金鑰僅儲存於您本地瀏覽器的 LocalStorage，並在每次對話時傳遞給後端，安全隱私。
+                    </p>
+                </div>
+                <div class="settings-actions">
+                    <button id="settings-save-btn" class="primary-btn">儲存設定</button>
+                    <button id="settings-clear-btn" class="secondary-btn">清除自訂金鑰</button>
+                </div>
             </div>
         </div>
     </div>

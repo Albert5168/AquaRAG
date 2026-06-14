@@ -58,6 +58,15 @@ document.addEventListener("DOMContentLoaded", () => {
     const modalContent = document.getElementById("modal-content");
     const modalCloseBtn = document.getElementById("modal-close-btn");
 
+    // Settings DOM
+    const settingsModal = document.getElementById("settings-modal");
+    const settingsToggleBtn = document.getElementById("settings-toggle-btn");
+    const settingsCloseBtn = document.getElementById("settings-close-btn");
+    const settingsSaveBtn = document.getElementById("settings-save-btn");
+    const settingsClearBtn = document.getElementById("settings-clear-btn");
+    const userGeminiKeyInput = document.getElementById("user-gemini-key");
+    const toggleKeyVisibilityBtn = document.getElementById("toggle-key-visibility");
+
     // TAB TITLES AND DESCRIPTIONS
     const tabInfo = {
         "chat-tab": {
@@ -488,6 +497,7 @@ document.addEventListener("DOMContentLoaded", () => {
         citationsPanel.style.display = "none";
 
         try {
+            const customApiKey = localStorage.getItem("aquarag_gemini_api_key") || "";
             const response = await fetch("/api/chat", {
                 method: "POST",
                 headers: {
@@ -495,7 +505,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 },
                 body: JSON.stringify({
                     message: message,
-                    history: state.chatHistory
+                    history: state.chatHistory,
+                    api_key: customApiKey
                 })
             });
 
@@ -686,9 +697,73 @@ document.addEventListener("DOMContentLoaded", () => {
     document.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
             closeModal();
+            if (settingsModal) settingsModal.classList.remove("active");
             citationsPanel.style.display = "none";
         }
     });
+
+    // 7. SETTINGS EVENT LISTENERS
+    if (settingsToggleBtn) {
+        settingsToggleBtn.addEventListener("click", () => {
+            const savedKey = localStorage.getItem("aquarag_gemini_api_key") || "";
+            userGeminiKeyInput.value = savedKey;
+            settingsModal.classList.add("active");
+        });
+    }
+
+    if (settingsCloseBtn) {
+        settingsCloseBtn.addEventListener("click", () => {
+            settingsModal.classList.remove("active");
+        });
+    }
+
+    if (settingsModal) {
+        settingsModal.addEventListener("click", (e) => {
+            if (e.target === settingsModal) {
+                settingsModal.classList.remove("active");
+            }
+        });
+    }
+
+    if (toggleKeyVisibilityBtn) {
+        toggleKeyVisibilityBtn.addEventListener("click", () => {
+            const icon = toggleKeyVisibilityBtn.querySelector("i");
+            if (userGeminiKeyInput.type === "password") {
+                userGeminiKeyInput.type = "text";
+                icon.classList.remove("fa-eye");
+                icon.classList.add("fa-eye-slash");
+            } else {
+                userGeminiKeyInput.type = "password";
+                icon.classList.remove("fa-eye-slash");
+                icon.classList.add("fa-eye");
+            }
+        });
+    }
+
+    if (settingsSaveBtn) {
+        settingsSaveBtn.addEventListener("click", () => {
+            const key = userGeminiKeyInput.value.trim();
+            if (key) {
+                localStorage.setItem("aquarag_gemini_api_key", key);
+                alert("Gemini API Key 已儲存至本地瀏覽器！");
+            } else {
+                localStorage.removeItem("aquarag_gemini_api_key");
+                alert("自訂金鑰已清除，將使用系統預設金鑰！");
+            }
+            settingsModal.classList.remove("active");
+            loadStats();
+        });
+    }
+
+    if (settingsClearBtn) {
+        settingsClearBtn.addEventListener("click", () => {
+            localStorage.removeItem("aquarag_gemini_api_key");
+            userGeminiKeyInput.value = "";
+            alert("自訂金鑰已清除，將使用系統預設金鑰！");
+            settingsModal.classList.remove("active");
+            loadStats();
+        });
+    }
 
     // Start with chat tab active
     switchTab("chat-tab");
