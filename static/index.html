@@ -293,21 +293,41 @@
             </div>
             <div class="modal-body settings-body">
                 <div class="setting-group">
-                    <label for="user-gemini-key">自訂 Gemini API Key</label>
+                    <label for="user-api-provider">API 供應商 (Provider)</label>
+                    <div class="select-wrapper">
+                        <select id="user-api-provider">
+                            <option value="system-default">系統預設 (System Default)</option>
+                            <option value="gemini">Google Gemini API</option>
+                            <option value="openrouter">OpenRouter API (免費/多模型)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="setting-group">
+                    <label for="user-api-key">API 金鑰 (API Key)</label>
                     <div class="input-with-icon">
                         <i class="fa-solid fa-key"></i>
-                        <input type="password" id="user-gemini-key" placeholder="貼上您的 AI Studio Gemini API Key (不儲存於伺服器)">
+                        <input type="password" id="user-api-key" placeholder="貼上您的 API Key (不儲存於伺服器)">
                         <button type="button" id="toggle-key-visibility" class="toggle-visibility-btn">
                             <i class="fa-solid fa-eye"></i>
                         </button>
                     </div>
-                    <p class="setting-help">
-                        若系統預設金鑰配額用盡（429 錯誤），可在此填入您自己的 API Key。該金鑰僅儲存於您本地瀏覽器的 LocalStorage，並在每次對話時傳遞給後端，安全隱私。
+                </div>
+                <div class="setting-group" id="model-group">
+                    <label for="user-api-model">自訂模型名稱 (Model ID)</label>
+                    <div class="input-with-icon">
+                        <i class="fa-solid fa-robot"></i>
+                        <input type="text" id="user-api-model" placeholder="例如: gemini-2.0-flash 或 liquid/lfm-2.5-1.2b-instruct:free">
+                    </div>
+                    <p class="setting-help" id="model-help-tips">
+                        Gemini 預設為 <code>gemini-2.0-flash</code>。OpenRouter 推薦 <code>liquid/lfm-2.5-1.2b-instruct:free</code> 或 <code>meta-llama/llama-3.3-70b-instruct:free</code> 等免費模型。
                     </p>
                 </div>
+                <p class="setting-help">
+                    自訂設定儲存於您本地瀏覽器的 LocalStorage，並在對話時安全傳遞給後端，保護您的隱私。
+                </p>
                 <div class="settings-actions">
                     <button id="settings-save-btn" class="primary-btn">儲存設定</button>
-                    <button id="settings-clear-btn" class="secondary-btn">清除自訂金鑰</button>
+                    <button id="settings-clear-btn" class="secondary-btn">清除所有設定</button>
                 </div>
             </div>
         </div>

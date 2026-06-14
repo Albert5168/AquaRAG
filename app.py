@@ -75,6 +75,8 @@ class ChatRequest(BaseModel):
     message: str
     history: List[ChatMessage]
     api_key: str = None
+    provider: str = None
+    model: str = None
 
 @app.get("/api/stats")
 def get_stats():
@@ -198,7 +200,7 @@ def search(q: str, top_k: int = 5):
         })
     return formatted_results
 
-async def sse_chat_generator(message: str, history: List[Dict[str, str]], custom_api_key: str = None):
+async def sse_chat_generator(message: str, history: List[Dict[str, str]], custom_api_key: str = None, provider: str = None, model: str = None):
     # 1. Retrieve top-4 relevant chunks
     results = search_engine.search(message, top_k=4)
     
@@ -240,6 +242,68 @@ async def sse_chat_generator(message: str, history: List[Dict[str, str]], custom
         "請開始答題："
     )
     
+    # Check if this is OpenRouter provider
+    is_openrouter = (provider == "openrouter") or (custom_api_key and custom_api_key.strip().startswith("sk-or-"))
+    
+    if is_openrouter:
+        try:
+            or_key = custom_api_key.strip() if (custom_api_key and custom_api_key.strip()) else os.getenv("OPENROUTER_API_KEY")
+            if not or_key:
+                raise Exception("Missing OpenRouter API Key. Please configure it in Settings.")
+            
+            or_model = model.strip() if (model and model.strip()) else os.getenv("OPENROUTER_MODEL", "liquid/lfm-2.5-1.2b-instruct:free")
+            
+            or_messages = []
+            for msg in history:
+                or_messages.append({
+                    "role": msg["role"],
+                    "content": msg["content"]
+                })
+            or_messages.append({
+                "role": "user",
+                "content": prompt
+            })
+            
+            url = "https://openrouter.ai/api/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {or_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://aquarag.onrender.com",
+                "X-Title": "AquaRAG"
+            }
+            payload = {
+                "model": or_model,
+                "messages": or_messages,
+                "stream": True
+            }
+            
+            response = requests.post(url, headers=headers, json=payload, stream=True, timeout=60)
+            response.raise_for_status()
+            
+            for chunk in response.iter_lines():
+                if chunk:
+                    chunk_str = chunk.decode("utf-8").strip()
+                    if chunk_str.startswith("data: "):
+                        data_content = chunk_str[6:].strip()
+                        if data_content == "[DONE]":
+                            break
+                        try:
+                            data_json = json.loads(data_content)
+                            text = data_json["choices"][0]["delta"].get("content", "")
+                            if text:
+                                content_tw = zhconv.convert(text, "zh-tw")
+                                payload_data = {"text": content_tw}
+                                yield f"event: text\ndata: {json.dumps(payload_data, ensure_ascii=False)}\n\n"
+                        except:
+                            pass
+            
+            yield "event: done\ndata: {}\n\n"
+            return
+        except Exception as e:
+            err_data = {"error": f"OpenRouter API Error: {str(e)}"}
+            yield f"event: error\ndata: {json.dumps(err_data, ensure_ascii=False)}\n\n"
+            return
+
     # Check Gemini keys to try
     keys_to_try = []
     if custom_api_key and custom_api_key.strip():
@@ -338,7 +402,13 @@ async def sse_chat_generator(message: str, history: List[Dict[str, str]], custom
 async def chat(request: ChatRequest):
     history_dicts = [{"role": msg.role, "content": msg.content} for msg in request.history]
     return StreamingResponse(
-        sse_chat_generator(request.message, history_dicts, custom_api_key=request.api_key),
+        sse_chat_generator(
+            request.message,
+            history_dicts,
+            custom_api_key=request.api_key,
+            provider=request.provider,
+            model=request.model
+        ),
         media_type="text/event-stream"
     )
 

@@ -64,7 +64,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const settingsCloseBtn = document.getElementById("settings-close-btn");
     const settingsSaveBtn = document.getElementById("settings-save-btn");
     const settingsClearBtn = document.getElementById("settings-clear-btn");
-    const userGeminiKeyInput = document.getElementById("user-gemini-key");
+    const userApiProviderSelect = document.getElementById("user-api-provider");
+    const userApiKeyInput = document.getElementById("user-api-key");
+    const userApiModelInput = document.getElementById("user-api-model");
     const toggleKeyVisibilityBtn = document.getElementById("toggle-key-visibility");
 
     // TAB TITLES AND DESCRIPTIONS
@@ -497,7 +499,9 @@ document.addEventListener("DOMContentLoaded", () => {
         citationsPanel.style.display = "none";
 
         try {
-            const customApiKey = localStorage.getItem("aquarag_gemini_api_key") || "";
+            const customApiKey = localStorage.getItem("aquarag_api_key") || "";
+            const customApiProvider = localStorage.getItem("aquarag_api_provider") || "system-default";
+            const customApiModel = localStorage.getItem("aquarag_api_model") || "";
             const response = await fetch("/api/chat", {
                 method: "POST",
                 headers: {
@@ -506,7 +510,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 body: JSON.stringify({
                     message: message,
                     history: state.chatHistory,
-                    api_key: customApiKey
+                    api_key: customApiKey,
+                    provider: customApiProvider,
+                    model: customApiModel
                 })
             });
 
@@ -703,10 +709,43 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // 7. SETTINGS EVENT LISTENERS
+    function toggleSettingsFields() {
+        if (!userApiProviderSelect) return;
+        const provider = userApiProviderSelect.value;
+        const keyGroup = userApiKeyInput ? userApiKeyInput.closest(".setting-group") : null;
+        const modelGroup = document.getElementById("model-group");
+        
+        if (provider === "system-default") {
+            if (keyGroup) keyGroup.style.display = "none";
+            if (modelGroup) modelGroup.style.display = "none";
+        } else {
+            if (keyGroup) keyGroup.style.display = "flex";
+            if (modelGroup) modelGroup.style.display = "flex";
+            
+            if (provider === "gemini") {
+                if (userApiKeyInput) userApiKeyInput.placeholder = "貼上您的 AI Studio Gemini API Key";
+                if (userApiModelInput) userApiModelInput.placeholder = "例如: gemini-2.0-flash";
+                const tips = document.getElementById("model-help-tips");
+                if (tips) tips.innerHTML = "Gemini 預設為 <code>gemini-2.0-flash</code>。";
+            } else if (provider === "openrouter") {
+                if (userApiKeyInput) userApiKeyInput.placeholder = "貼上您的 OpenRouter API Key (sk-or-...)";
+                if (userApiModelInput) userApiModelInput.placeholder = "例如: liquid/lfm-2.5-1.2b-instruct:free";
+                const tips = document.getElementById("model-help-tips");
+                if (tips) tips.innerHTML = "OpenRouter 推薦 <code>liquid/lfm-2.5-1.2b-instruct:free</code> 或 <code>meta-llama/llama-3.3-70b-instruct:free</code>。";
+            }
+        }
+    }
+
+    if (userApiProviderSelect) {
+        userApiProviderSelect.addEventListener("change", toggleSettingsFields);
+    }
+
     if (settingsToggleBtn) {
         settingsToggleBtn.addEventListener("click", () => {
-            const savedKey = localStorage.getItem("aquarag_gemini_api_key") || "";
-            userGeminiKeyInput.value = savedKey;
+            if (userApiProviderSelect) userApiProviderSelect.value = localStorage.getItem("aquarag_api_provider") || "system-default";
+            if (userApiKeyInput) userApiKeyInput.value = localStorage.getItem("aquarag_api_key") || "";
+            if (userApiModelInput) userApiModelInput.value = localStorage.getItem("aquarag_api_model") || "";
+            toggleSettingsFields();
             settingsModal.classList.add("active");
         });
     }
@@ -727,13 +766,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (toggleKeyVisibilityBtn) {
         toggleKeyVisibilityBtn.addEventListener("click", () => {
+            if (!userApiKeyInput) return;
             const icon = toggleKeyVisibilityBtn.querySelector("i");
-            if (userGeminiKeyInput.type === "password") {
-                userGeminiKeyInput.type = "text";
+            if (userApiKeyInput.type === "password") {
+                userApiKeyInput.type = "text";
                 icon.classList.remove("fa-eye");
                 icon.classList.add("fa-eye-slash");
             } else {
-                userGeminiKeyInput.type = "password";
+                userApiKeyInput.type = "password";
                 icon.classList.remove("fa-eye-slash");
                 icon.classList.add("fa-eye");
             }
@@ -742,13 +782,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (settingsSaveBtn) {
         settingsSaveBtn.addEventListener("click", () => {
-            const key = userGeminiKeyInput.value.trim();
-            if (key) {
-                localStorage.setItem("aquarag_gemini_api_key", key);
-                alert("Gemini API Key 已儲存至本地瀏覽器！");
+            const provider = userApiProviderSelect ? userApiProviderSelect.value : "system-default";
+            const key = userApiKeyInput ? userApiKeyInput.value.trim() : "";
+            const model = userApiModelInput ? userApiModelInput.value.trim() : "";
+            
+            localStorage.setItem("aquarag_api_provider", provider);
+            if (provider === "system-default") {
+                localStorage.removeItem("aquarag_api_key");
+                localStorage.removeItem("aquarag_api_model");
+                alert("已切換為系統預設模式！");
             } else {
-                localStorage.removeItem("aquarag_gemini_api_key");
-                alert("自訂金鑰已清除，將使用系統預設金鑰！");
+                localStorage.setItem("aquarag_api_key", key);
+                localStorage.setItem("aquarag_api_model", model);
+                alert("自訂設定儲存成功！");
             }
             settingsModal.classList.remove("active");
             loadStats();
@@ -757,9 +803,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (settingsClearBtn) {
         settingsClearBtn.addEventListener("click", () => {
-            localStorage.removeItem("aquarag_gemini_api_key");
-            userGeminiKeyInput.value = "";
-            alert("自訂金鑰已清除，將使用系統預設金鑰！");
+            localStorage.removeItem("aquarag_api_provider");
+            localStorage.removeItem("aquarag_api_key");
+            localStorage.removeItem("aquarag_api_model");
+            if (userApiProviderSelect) userApiProviderSelect.value = "system-default";
+            if (userApiKeyInput) userApiKeyInput.value = "";
+            if (userApiModelInput) userApiModelInput.value = "";
+            alert("自訂設定已全部清除，將使用系統預設設定！");
             settingsModal.classList.remove("active");
             loadStats();
         });

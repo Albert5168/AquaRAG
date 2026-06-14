@@ -1515,3 +1515,43 @@ body {
     color: var(--text-primary);
 }
 
+.select-wrapper {
+    position: relative;
+    width: 100%;
+}
+
+.select-wrapper select {
+    width: 100%;
+    background-color: #0c1527;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px;
+    color: var(--text-primary);
+    font-family: var(--font-main);
+    font-size: 14px;
+    outline: none;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    transition: var(--transition-fast);
+}
+
+.select-wrapper select:focus {
+    border-color: var(--accent-cyan);
+    box-shadow: 0 0 8px rgba(0, 242, 254, 0.1);
+}
+
+.select-wrapper::after {
+    content: '\f078';
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    pointer-events: none;
+    font-size: 12px;
+}
+
+
