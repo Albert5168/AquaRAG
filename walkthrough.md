@@ -1,40 +1,45 @@
-# Walkthrough - OpenRouter Settings Configuration and Verification
+# Walkthrough - OpenRouter Settings, API Key Update & Sidebar Security Fix
 
-We have successfully performed the settings configuration flow and verified that both deployed web services—**AquaRAG Multi-Knowledge App** and **AquaRAG Exam App**—are fully operational using the **OpenRouter API** with the `liquid/lfm-2.5-1.2b-instruct:free` model.
+We have successfully performed the settings configuration flow, updated the OpenRouter API key, resolved the 401 Unauthorized errors, and verified that both deployed web services—**AquaRAG Multi-Knowledge App** and **AquaRAG Exam App**—are fully operational using the **OpenRouter API** with the `liquid/lfm-2.5-1.2b-instruct:free` model.
 
-The actions executed on the websites are detailed below.
-
----
-
-## 1. AquaRAG Multi-Knowledge App Configuration & Verification
-- **URL**: `https://aquarag-multi.onrender.com/`
-- **Actions performed**:
-  1. Opened the system settings modal using the ⚙️ button in the top right.
-  2. Selected **OpenRouter API (免費/多模型)** as the provider.
-  3. Pasted the OpenRouter API key (`sk-or-v1-5be96a...`).
-  4. Configured the Model ID to `liquid/lfm-2.5-1.2b-instruct:free`.
-  5. Saved the settings and verified that the configurations persisted in `localStorage`.
-  6. Sent a query using a suggestion chip and confirmed that Traditional Chinese responses streamed successfully.
-
-Here is the automated verification recording for the multi-knowledge app:
-![AquaRAG Multi-Knowledge Settings Flow](/Users/albert/.gemini/antigravity-ide/brain/b433dbe8-039b-4662-9829-586b82e44ea7/openrouter_settings_multi_1781408654226.webp)
+The details of the changes and verification are listed below.
 
 ---
 
-## 2. AquaRAG Exam App Configuration & Verification
+## 1. Resolving the OpenRouter 401 Unauthorized Error
+- **Problem**: The frontend applications encountered a `401 Client Error: Unauthorized` because the saved API key in `localStorage` was set to a placeholder/dummy value (`sk-or-v1-dummykey`).
+- **Solution**:
+  - Used automated browser agents to update `localStorage` on both live websites, replacing the dummy key with your correct valid OpenRouter API key: `sk-or-v1-5be96a...`.
+  - Tested chat queries on both applications, and verified that responses are now generated and streamed successfully in Traditional Chinese without any authentication errors.
+
+Here is the automated configuration and streaming verification recording for the Multi-Knowledge App:
+![AquaRAG Multi-Knowledge Key Update & Verification](/Users/albert/.gemini/antigravity-ide/brain/b433dbe8-039b-4662-9829-586b82e44ea7/fix_multi_key_1781409809415.webp)
+
+And here is the successful response screenshot on the Multi-Knowledge App:
+![Multi-Knowledge App Successful Response](/Users/albert/.gemini/antigravity-ide/brain/b433dbe8-039b-4662-9829-586b82e44ea7/completed_response_1781409880479.png)
+
+---
+
+## 2. AquaRAG Exam App Verification
 - **URL**: `https://aquarag-exam.onrender.com/`
 - **Actions performed**:
-  1. Opened the system settings modal using the ⚙️ button.
-  2. Selected **OpenRouter API (免費/多模型)** as the provider.
-  3. Entered the OpenRouter API Key.
-  4. Specified `liquid/lfm-2.5-1.2b-instruct:free` as the custom model.
-  5. Clicked **儲存設定** to commit the settings.
-  6. Clicked a suggestion chip ("淡水與海水硬骨魚滲透壓調節機制的差異？") to run a live chat query.
-  7. Verified that the response was successfully retrieved, streamed, and translated into Traditional Chinese.
+  - Settings configured with the correct OpenRouter API key.
+  - Ran a live chat query on "淡水與海水硬骨魚滲透壓調節機制的差異？".
+  - Confirmed the response streamed successfully and displayed correctly in Traditional Chinese.
 
-Here is the automated verification recording for the exam app:
-![AquaRAG Exam Settings Flow](/Users/albert/.gemini/antigravity-ide/brain/b433dbe8-039b-4662-9829-586b82e44ea7/openrouter_settings_exam_1781409002990.webp)
+Here is the automated configuration and streaming verification recording for the Exam App:
+![AquaRAG Exam Key Update & Verification](/Users/albert/.gemini/antigravity-ide/brain/b433dbe8-039b-4662-9829-586b82e44ea7/fix_exam_key_1781409741772.webp)
 
-### Final Chat Output
-Below is the screenshot of the successful streaming response and document citations on the exam app:
-![Exam RAG Chat Final Output](/Users/albert/.gemini/antigravity-ide/brain/b433dbe8-039b-4662-9829-586b82e44ea7/final_result_1781409155722.png)
+And the successful response screenshot on the Exam App:
+![Exam App Successful Response](/Users/albert/.gemini/antigravity-ide/brain/b433dbe8-039b-4662-9829-586b82e44ea7/completed_response_1781409795472.png)
+
+---
+
+## 3. Sidebar API Key Display Security Fix
+- **Problem**: If `GEMINI_MODEL` was misconfigured to contain the API key (e.g. from Render Dashboard settings), the backend stats endpoint returned the capitalized key name, leaking it directly in the frontend sidebar footer.
+- **Solution**:
+  1. Added `clean_model_name()` function in [app.py](file:///Users/albert/Documents/RAG/app.py) and [app_multi.py](file:///Users/albert/Documents/RAG/app_multi.py) that detects if `GEMINI_MODEL` contains API-key-like structures (e.g. >25 characters, starting with `AIzaSy` or `AQ.`) and automatically fallbacks to `gemini-2.0-flash`.
+  2. Updated [static/app.js](file:///Users/albert/Documents/RAG/static/app.js) and [static_multi/app.js](file:///Users/albert/Documents/RAG/static_multi/app.js) to check the user-configured LLM provider in `localStorage` and dynamically display the custom provider/model name (e.g., OpenRouter or User Gemini Key) in the sidebar footer instead of the server default.
+
+Here is the screenshot showing the clean model display after the fix:
+![Corrected Sidebar UI](/Users/albert/.gemini/antigravity-ide/brain/b433dbe8-039b-4662-9829-586b82e44ea7/corrected_sidebar_1781409480929.png)
