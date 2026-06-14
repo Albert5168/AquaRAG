@@ -319,7 +319,8 @@ async def sse_chat_generator(message: str, history: List[Dict[str, str]], custom
         "content": prompt
     })
     
-    url = "http://localhost:11434/api/chat"
+    ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+    url = f"{ollama_host}/api/chat"
     payload = {
         "model": os.getenv("OLLAMA_MODEL", "qwen2.5"),
         "messages": ollama_messages,
