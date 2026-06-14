@@ -1,6 +1,6 @@
 # Walkthrough - OpenRouter Settings, Settings Button UI Fix & Sidebar Security Fix
 
-We have successfully performed the settings configuration flow, updated the OpenRouter API key, resolved the 401 Unauthorized errors, fixed the settings button rendering issue, and verified that both deployed web services—**AquaRAG Multi-Knowledge App** and **AquaRAG Exam App**—are fully operational.
+We have successfully performed the settings configuration flow, updated the OpenRouter API key, resolved the 401 Unauthorized errors, fixed the settings button rendering issues on both systems, and verified that both deployed web services—**AquaRAG Multi-Knowledge App** and **AquaRAG Exam App**—are fully operational.
 
 The details of the changes and verification are listed below.
 
@@ -14,11 +14,19 @@ The details of the changes and verification are listed below.
   1. **Inline SVG Gear Icon**: Replaced FontAwesome `<i>` tags inside the settings button with clean inline `<svg>` vector gear icons in [static/index.html](file:///Users/albert/Documents/RAG/static/index.html) and [static_multi/index.html](file:///Users/albert/Documents/RAG/static_multi/index.html). This removes dependencies on external CDNs or font fallbacks.
   2. **Appearance and Property Resets**: Rewrote `.settings-btn` CSS definitions in [static/style.css](file:///Users/albert/Documents/RAG/static/style.css) and [static_multi/style.css](file:///Users/albert/Documents/RAG/static_multi/style.css) using `-webkit-appearance: none;`, `padding: 0 !important;`, and `background: transparent !important;` to completely bypass any default browser button styles.
 
-Here is the automated configuration and style verification recording:
-![AquaRAG Settings Button Fix Recording](/Users/albert/.gemini/antigravity-ide/brain/b433dbe8-039b-4662-9829-586b82e44ea7/verify_settings_button_fix_1781411140344.webp)
+### A. AquaRAG Multi-Knowledge App Verification (`https://aquarag-multi.onrender.com/`)
+Here is the automated configuration and style verification recording for the Multi-Knowledge App:
+![AquaRAG Multi Settings Button Fix Recording](/Users/albert/.gemini/antigravity-ide/brain/b433dbe8-039b-4662-9829-586b82e44ea7/verify_multi_button_fix_1781411292855.webp)
 
-And here is the screenshot showing the beautifully rendered settings button alongside the system status badge:
-![Corrected Settings Button UI](/Users/albert/.gemini/antigravity-ide/brain/b433dbe8-039b-4662-9829-586b82e44ea7/header_status_and_settings_1781411209452.png)
+And here is the screenshot showing the beautifully rendered settings button alongside the system status badge on the Multi-Knowledge App:
+![Corrected Multi App Settings Button UI](/Users/albert/.gemini/antigravity-ide/brain/b433dbe8-039b-4662-9829-586b82e44ea7/header_area_1781411362854.png)
+
+### B. AquaRAG Exam App Verification (`https://aquarag-exam.onrender.com/`)
+Here is the automated configuration and style verification recording for the Exam App:
+![AquaRAG Exam Settings Button Fix Recording](/Users/albert/.gemini/antigravity-ide/brain/b433dbe8-039b-4662-9829-586b82e44ea7/verify_settings_button_fix_1781411140344.webp)
+
+And the screenshot showing the corrected settings button layout on the Exam App:
+![Corrected Exam App Settings Button UI](/Users/albert/.gemini/antigravity-ide/brain/b433dbe8-039b-4662-9829-586b82e44ea7/header_status_and_settings_1781411209452.png)
 
 ---
 
