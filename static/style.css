@@ -1381,25 +1381,40 @@ body {
 }
 
 .settings-btn {
-    background: transparent;
-    border: none;
-    color: var(--text-secondary);
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background: transparent !important;
+    background-color: transparent !important;
+    border: 1px solid var(--border-color) !important;
+    color: var(--text-secondary) !important;
     font-size: 18px;
     cursor: pointer;
     width: 36px;
     height: 36px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    border-radius: 50% !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
     transition: var(--transition-fast);
-    border: 1px solid var(--border-color);
+    padding: 0 !important;
+    margin: 0 !important;
+    outline: none;
+    box-sizing: border-box;
 }
 
 .settings-btn:hover {
-    background-color: rgba(255, 255, 255, 0.05);
-    color: var(--accent-cyan);
-    border-color: var(--accent-cyan);
+    background-color: rgba(255, 255, 255, 0.05) !important;
+    color: var(--accent-cyan) !important;
+    border-color: var(--accent-cyan) !important;
+}
+
+.settings-btn svg {
+    display: block;
+    width: 18px;
+    height: 18px;
+    fill: currentColor;
+    stroke: currentColor;
 }
 
 .settings-body {
